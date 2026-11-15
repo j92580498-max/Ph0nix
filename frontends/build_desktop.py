@@ -16,8 +16,11 @@ from db2010.development.source import apply_patches
 
 
 def run(args, cwd=ROOT):
-    print('+', ' '.join(map(str, args)), flush=True)
-    subprocess.run(list(map(str, args)), cwd=cwd, check=True)
+    args = list(map(str, args))
+    # Windows process lookup can select System32's WSL bash before PATH.
+    args[0] = shutil.which(args[0]) or args[0]
+    print('+', ' '.join(args), flush=True)
+    subprocess.run(args, cwd=cwd, check=True)
 
 
 def windows_dlls(executables, destination):
