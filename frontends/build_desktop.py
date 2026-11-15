@@ -23,7 +23,7 @@ def run(args, cwd=ROOT):
 def windows_dlls(executables, destination):
     objdump = shutil.which('objdump')
     if not objdump:
-        raise RuntimeError('Run inside MSYS2 MINGW64 with binutils installed.')
+        raise RuntimeError('Run inside MSYS2 UCRT64 with binutils installed.')
     library_dir = Path(objdump).resolve().parent
     pending = list(executables)
     copied = set()

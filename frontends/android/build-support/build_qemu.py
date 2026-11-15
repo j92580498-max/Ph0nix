@@ -52,7 +52,10 @@ def setup_tools(ndk, build, clang):
         wrapper.write_text('#!'+shutil.which('python3')+'\n'+
             'import os, sys\n'+
             'base='+repr([compiler, '--target=aarch64-linux-android24', '--sysroot='+str(sysroot),
-                '-resource-dir='+str(resource), '-isystem', str(include), '-fPIC'])+'\n'+
+                # The NDK resource directory supplies Android runtime archives.
+                # Use just the host compiler's builtin headers: two Clang
+                # stdint.h headers share a guard and break include_next.
+                '-resource-dir='+str(resource), '-nobuiltininc', '-isystem', str(include), '-fPIC'])+'\n'+
             'args=[a for a in sys.argv[1:] if not a.startswith("--target=aarch64-linux-android")]\n'+
             'if not any(arg in args for arg in ["-c","-E","-S","--version","-dumpmachine"]):\n'+
             '    base+='+repr(['-fuse-ld='+str(llvm/'ld.lld'), '-rtlib=compiler-rt', '--unwindlib=none',

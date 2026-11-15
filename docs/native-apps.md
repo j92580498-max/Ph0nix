@@ -13,7 +13,7 @@ execution uses the device backends, rather than J2ME-Loader's MIDlet runtime.
 | Platform | Application | Current validation |
 | --- | --- | --- |
 | Linux | Rust egui/eframe window and native QEMU child | ARM64 build and native transport; desktop window checks recorded with the test artifacts |
-| Windows | Same native launcher and QMP host; MSYS2 MINGW64 build and DLL packaging | Build workflow provided; Windows execution has not been tested on this Linux ARM64 host |
+| Windows | Same native launcher and QMP host; MSYS2 UCRT64 build and DLL packaging | Build workflow provided; Windows execution has not been tested on this Linux ARM64 host |
 | Android | Kotlin/Material native UI, Rust JNI worker, packaged Android QEMU PIE | ARM64 debug APK; device installation/runtime testing remains necessary |
 
 ## Testing the APK
@@ -125,12 +125,14 @@ source checkout. Settings and sessions live under XDG data storage.
 
 ## Windows
 
-Use the **MINGW64** shell in MSYS2. Install GCC, Rust, Python/pip, Ninja, CMake,
-pkgconf, GLib, GTK 3, zlib, clang, and libiconv from the matching
-`mingw-w64-x86_64-*` packages. The exact package list and build commands are in
+Use the **UCRT64** shell in MSYS2. Install GCC, Rust, Python/pip, Ninja, CMake,
+pkgconf, GLib, GTK 3, zlib, clang, libiconv, and DTC from the matching
+`mingw-w64-ucrt-x86_64-*` packages. The exact package list and build commands are in
 `.github/workflows/native-apps.yml`.
 
 ```sh
+git config --global core.autocrlf false
+git config --global core.longpaths true
 git submodule update --init --recursive
 python frontends/build_desktop.py --jobs 2
 ```
