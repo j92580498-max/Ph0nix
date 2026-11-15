@@ -1,21 +1,72 @@
 # Ph0nix
 
-<img src="assets/branding/logo.svg" width="160" height="160" alt="Ph0nix pixel-art button phone">
+<p align="center">
+  <img src="assets/branding/logo.svg" width="25%" alt="Ph0nix pixel-art button phone" />
+</p>
 
-A native phone firmware emulator with a QEMU backend for the Sony Ericsson W800i and K750i. The K750i
-R1DB001 CID49 profile boots into the original phone interface and reaches all
-five Settings tabs and the bundled games through the native app backend. Native applications for
-Linux, Windows and Android use a J2ME-Loader-based firmware library; see
-[native applications and APK testing](docs/native-apps.md).
+<p align="center">
+  A Sony Ericsson phone firmware emulator for Linux, Windows and Android.
+</p>
 
-[Download Ph0nix 1.0 for Windows, Linux and Android](https://github.com/j92580498-max/Ph0nix/releases/tag/v1.0).
-Firmware MAIN/FS images are imported by the user. See the
-[1.0 release notes](docs/releases/1.0.md) for tested behavior and media limitations.
+<p align="center">
+  <a href="https://t.me/phonix_emulator">
+    <img src="https://img.shields.io/badge/Telegram-Follow%20Development-26A5E4?style=for-the-badge&logo=telegram&logoColor=white" alt="Follow Ph0nix on Telegram" />
+  </a>
+  <a href="https://discord.gg/C9vb43bgkg">
+    <img src="https://img.shields.io/badge/Discord-Join%20our%20Community-5865F2?style=for-the-badge&logo=discord&logoColor=white" alt="Join the Ph0nix Discord community" />
+  </a>
+</p>
 
-The Python research runner and browser tools remain available for DB2010
-investigation. W800 R1L002 CID49 research images are supplied locally; their
-identities are documented under `fw/`. [K750i bring-up](docs/k750i.md) records
-its inputs and hardware limits.
+<p align="center">
+  <strong>Follow development updates on Telegram and join Discord for compatibility discussions, support and community chat.</strong>
+</p>
+
+---
+
+> [!NOTE]
+> Ph0nix is experimental. Compatibility, performance and hardware support vary
+> by firmware profile and host platform. See the [1.0 release notes](docs/releases/1.0.md)
+> for tested behavior and media limitations.
+
+## Info
+
+Ph0nix is a firmware emulator for Sony Ericsson DB2010 phones, focusing on the
+K750i and W800i. It runs original phone firmware through a QEMU board model,
+with native applications for Linux, Windows and Android.
+
+The K750i R1DB001 CID49 profile reaches the original phone interface, including
+all five Settings tabs and the bundled games. The apps provide phone controls,
+settings, saved sessions and a firmware library interface based on
+[J2ME-Loader](https://github.com/nikita36078/J2ME-Loader).
+
+The desktop host is written in Rust, and the Android frontend uses Kotlin with
+a Rust JNI host. The Python research runner and browser tools remain available
+for DB2010 investigation. See [native applications](docs/native-apps.md) and
+[K750i bring-up](docs/k750i.md) for usage and device details.
+
+## Builds
+
+Packaged builds for Windows, Linux and Android are produced by the
+[Native applications workflow](https://github.com/j92580498-max/Ph0nix/actions/workflows/native-apps.yml).
+Sign in to GitHub, open a successful run and download the artifact for your platform.
+See [native build instructions](docs/native-apps.md) for platform requirements
+and building from source.
+
+## Firmware
+
+Import the supported K750i MAIN and FS images through the app's Library.
+The current native profile accepts the R1DB001 CID49 pair. Firmware images and
+personal phone state are not included in the builds.
+
+W800 R1L002 CID49 research images are supplied locally and described in
+[firmware provenance](fw/README.md). K750i inputs and validation requirements
+are recorded in [K750i bring-up](docs/k750i.md).
+
+## Firmware interface
+
+![The five original K750i Settings tabs](docs/images/k750-native-settings.png)
+
+The five original Settings tabs in the K750i R1DB001 CID49 firmware.
 
 ## Hardware support
 
@@ -41,7 +92,7 @@ its inputs and hardware limits.
 | USB | Selected startup captures in `0xFD000004–0xFD0000FD` | 🔴 | No enumeration or packet transport |
 | Cellular radio/network | No functional RF/network device mapping | 🔴 | No registration or calls |
 
-## Setup
+## Research runner setup
 
 Requires Python 3.14+ with venv/pip support, available as `python3`.
 
@@ -73,7 +124,7 @@ python -m db2010.development.source init
 python -m db2010.development.build --jobs 4
 ```
 
-## Run
+## Research runner usage
 
 ```sh
 python -m db2010 --ui
@@ -98,6 +149,8 @@ earlier sparse bring-up profile.
 See [advanced usage and troubleshooting](docs/usage.md) for controls, SSH,
 diagnostics, traces, persistent state, GDB and testing, and
 [firmware provenance](fw/README.md) for image identities and assumptions.
+
+## Credits
 
 The DB2010 research runner and original board port derive from
 [danylokos/db2010](https://github.com/danylokos/db2010). The native Samsung
