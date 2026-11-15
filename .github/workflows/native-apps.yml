@@ -31,6 +31,9 @@ jobs:
           distribution: temurin
           java-version: '17'
       - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: false
       - run: sudo apt-get update && sudo apt-get install -y clang-19 lld-19 llvm-19 libclang-19-dev cmake ninja-build pkg-config python3-venv
       - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;29.0.14206865'
       - run: python3 -m venv build/android/host-tools
@@ -91,7 +94,9 @@ jobs:
     steps:
       - name: Preserve authenticated source line endings
         shell: pwsh
-        run: git config --global core.autocrlf false
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.longpaths true
       - uses: actions/checkout@v4
         with:
           submodules: recursive
