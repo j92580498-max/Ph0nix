@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  A Sony Ericsson phone firmware emulator for Linux, Windows and Android.
+  A push-button phone firmware emulator for Linux, Windows and Android.
 </p>
 
 <p align="center">
