@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Adapted from J2ME-Loader list_row_jar.xml, Apache-2.0; firmware actions added. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="wrap_content"
+    android:gravity="center_vertical" android:orientation="horizontal"
+    android:background="?android:selectableItemBackground" android:padding="10dp"
+    android:focusable="true">
+    <ImageView android:layout_width="36dp" android:layout_height="36dp"
+        android:layout_marginEnd="10dp" android:src="@drawable/ic_game" android:contentDescription="@null" />
+    <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+        android:layout_weight="1" android:orientation="vertical">
+        <TextView android:id="@+id/firmware_title" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:textSize="15sp" android:textStyle="bold"
+            android:maxLines="2" android:ellipsize="end" />
+        <TextView android:id="@+id/firmware_subtitle" android:layout_width="match_parent"
+            android:layout_height="wrap_content" android:layout_marginTop="2dp"
+            android:textSize="12sp" android:alpha="0.72" android:maxLines="2" />
+    </LinearLayout>
+    <ImageButton android:id="@+id/btn_run" android:layout_width="40dp" android:layout_height="48dp"
+        android:src="@drawable/ic_play" android:background="?android:selectableItemBackground"
+        android:contentDescription="@string/run_firmware" />
+    <ImageButton android:id="@+id/btn_more" android:layout_width="40dp" android:layout_height="48dp"
+        android:src="@drawable/ic_more_vert" android:background="?android:selectableItemBackground"
+        android:contentDescription="@string/firmware_options" />
+</LinearLayout>

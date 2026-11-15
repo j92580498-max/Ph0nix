@@ -1,0 +1,21 @@
+{
+  "format_version": 1,
+  "repository": "hxbn-proto/se-resurrected",
+  "commit": "7ef40799aad6dface08c756a5626dd52cdbdd8ce",
+  "paths": {
+    "main": "k750i/firmware/K750_R1DB001_MAIN_EU_1_CL_RED49.mbn",
+    "fs": "k750i/firmware/K750_R1DB001_FS_EMEA_1_RED49.fbn"
+  },
+  "gdfs_backup": {
+    "input_path": "fw/k750i/K750_GDFS.bin",
+    "size_bytes": 53827,
+    "sha256": "e74786bc68180c2aa1efff127f2fd2a3e27925fc6397fbc2ca933ac8ee65c5b1",
+    "url": "https://firmware.center/firmware/Sony-Ericsson/K750/K750_GDFS.bin"
+  },
+  "customization_archive": {
+    "input_path": "fw/k750i/K750i_CDA102338_36_EMEA_1.zip",
+    "size_bytes": 1549611,
+    "sha256": "4a63084f08931531e32c4ab4aeb438df20641684007d946963aac878f1353246",
+    "url": "https://firmware.center/firmware/Sony-Ericsson/K750/K750i_CDA102338_36_EMEA_1.zip"
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "source_main_payload_sha256": "50fa19d1de377197b7312b87f37ebac6c2895276c1ef9440e95705171386e635",
+  "source": "K750 R1DB001 CID49 original MAIN; stable low-byte RTC getter and its original MMIO literal",
+  "start": 1150501264,
+  "end": 1150501292,
+  "sha256": "4d483781dbcf8384d31c8c1aa1a72763689f0474234be4d39f5d16e48b5fb5ae",
+  "hex": "054908880006000e021c08880006000e9042f9d17047c046000005f9"
+}

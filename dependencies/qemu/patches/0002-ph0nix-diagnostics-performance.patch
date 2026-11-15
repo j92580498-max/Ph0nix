@@ -1,0 +1,176 @@
+diff --git a/hw/arm/db2010-device.c b/hw/arm/db2010-device.c
+index 07271ff..127501d 100644
+--- a/hw/arm/db2010-device.c
++++ b/hw/arm/db2010-device.c
+@@ -98,6 +98,8 @@ typedef struct DB2010DeviceBody {
+     void *timing_opaque;
+     DeviceState *dependencies[2];
+     unsigned dependency_count;
++    uint64_t reschedules, unchanged_deadlines, service_calls;
++    uint64_t schedule_samples, schedule_ns, service_samples, service_ns;
+ } DB2010DeviceBody;
+ 
+ typedef struct DB2010Controller {
+@@ -266,6 +268,12 @@ static void initialize_body(Object *obj, DB2010DeviceBody *b,
+                             const DB2010DeviceSpec *spec)
+ {
+     b->spec = spec; b->model = g_malloc0(spec->size);
++    if (spec->id == DBDEV_DISPLAY) {
++        /* Checkpoints contain an empty display even when PDI is inactive.
++         * Its cache and capture queues must exist before restore; an inactive
++         * model intentionally skips the ordinary device reset callback. */
++        db2010_display_capture_reset(b->model);
++    }
+     if (spec->id == DBDEV_SYSCON) {
+         DB2010Syscon *s = b->model;
+         s->cpu_clock = qdev_init_clock_out(DEVICE(obj), "cpu");
+@@ -533,22 +541,55 @@ void db2010_device_cancel_timer(DeviceState *dev)
+ void db2010_device_reschedule(DeviceState *dev)
+ {
+     DB2010DeviceBody *b = body_of(OBJECT(dev));
++    bool sample = (++b->reschedules & 255) == 0;
++    int64_t started = sample ? get_clock() : 0;
+     if (b->timer) {
+         int64_t due = b->deadline(b->timing_opaque);
+-        if (due < 0) { timer_del(b->timer); }
++        if ((due < 0 && !timer_pending(b->timer)) ||
++            (due >= 0 && timer_expire_time_ns(b->timer) == due)) {
++            /* Repeated register reads often leave the hardware deadline
++             * unchanged. Preserve the pending timer instead of taking its
++             * list lock, removing/reinserting it and notifying the host loop.
++             * Check the actual timer, so firing/reset/restore cannot leave
++             * stale cached scheduling state. Dependencies still reschedule. */
++            b->unchanged_deadlines++;
++        } else if (due < 0) { timer_del(b->timer); }
+         else { timer_mod_ns(b->timer, due); }
+     }
+     for (unsigned i = 0; i < b->dependency_count; i++) {
+         db2010_device_reschedule(b->dependencies[i]);
+     }
++    if (sample) { b->schedule_samples++; b->schedule_ns += MAX(get_clock() - started, 0); }
+ }
+ static void service_timer(void *opaque)
+ {
+     DeviceState *dev = opaque;
+     DB2010DeviceBody *b = body_of(OBJECT(dev));
++    bool sample = (++b->service_calls & 255) == 0;
++    int64_t started = sample ? get_clock() : 0;
+     b->service(b->timing_opaque);
++    if (sample) { b->service_samples++; b->service_ns += MAX(get_clock() - started, 0); }
+     db2010_device_reschedule(dev);
+ }
++
++const char *db2010_device_name(DB2010DeviceId id)
++{
++    assert(id < DBDEV_COUNT);
++    return devices[id].name;
++}
++QDict *db2010_device_profile(DeviceState *dev)
++{
++    DB2010DeviceBody *b = body_of(OBJECT(dev));
++    QDict *profile = qdict_new();
++    qdict_put_int(profile, "reschedules", b->reschedules);
++    qdict_put_int(profile, "unchanged_deadlines", b->unchanged_deadlines);
++    qdict_put_int(profile, "service_calls", b->service_calls);
++    qdict_put_int(profile, "schedule_samples", b->schedule_samples);
++    qdict_put_int(profile, "schedule_ns", b->schedule_ns);
++    qdict_put_int(profile, "service_samples", b->service_samples);
++    qdict_put_int(profile, "service_ns", b->service_ns);
++    return profile;
++}
+ void db2010_device_timing(DeviceState *dev, DB2010DeadlineFn deadline,
+                           DB2010ServiceFn service, void *opaque)
+ {
+diff --git a/hw/arm/db2010-device.h b/hw/arm/db2010-device.h
+index b66fc85..5a418bc 100644
+--- a/hw/arm/db2010-device.h
++++ b/hw/arm/db2010-device.h
+@@ -35,4 +35,7 @@ void db2010_device_timing(DeviceState *dev, DB2010DeadlineFn deadline,
+ void db2010_device_reschedule(DeviceState *dev);
+ void db2010_device_cancel_timer(DeviceState *dev);
+ void db2010_device_dependency(DeviceState *dev, DeviceState *dependent);
++/* Host-only counters; never serialized into a phone checkpoint. */
++QDict *db2010_device_profile(DeviceState *dev);
++const char *db2010_device_name(DB2010DeviceId id);
+ #endif
+diff --git a/hw/arm/db2010-internal.h b/hw/arm/db2010-internal.h
+index 60be3b5..1487984 100644
+--- a/hw/arm/db2010-internal.h
++++ b/hw/arm/db2010-internal.h
+@@ -181,6 +181,7 @@ typedef struct DB2010Progress {
+     uint32_t pc;
+     unsigned lcd_frames;
+     bool serial_ready, serial_present;
++    QDict *host_profile;
+ } DB2010Progress;
+ 
+ 
+diff --git a/hw/arm/db2010-observe.c b/hw/arm/db2010-observe.c
+index 6e25bbe..2892150 100644
+--- a/hw/arm/db2010-observe.c
++++ b/hw/arm/db2010-observe.c
+@@ -22,6 +22,11 @@ void collect_progress(CPUState *cpu, run_on_cpu_data data)
+     p->serial_present = s->uart_port->data_present;
+     p->serial_ready = s->uart_port->data_mode_known && (s->uart_port->data_mode & 7) == 2 &&
+                       (s->uart_port->data_mask & 0x41) == 0x41;
++    p->host_profile = qdict_new();
++    for (unsigned id = 0; id < DBDEV_COUNT; id++) {
++        qdict_put(p->host_profile, db2010_device_name(id),
++                  db2010_device_profile(s->devices[id]));
++    }
+ }
+ 
+ char *get_progress(Object *obj, Error **errp)
+@@ -62,6 +67,7 @@ char *get_progress(Object *obj, Error **errp)
+         qdict_put_int(progress, "timer_hz", clock_get_hz(s->timer->clock));
+         qdict_put_int(progress, "timer_irqs", p.timer_irqs);
+     }
++    if (p.host_profile) { qdict_put(progress, "host_profile", p.host_profile); }
+     text = qobject_to_json(QOBJECT(progress));
+     return g_strdup(text->str);
+ }
+@@ -77,6 +83,9 @@ char *get_summary(Object *obj, Error **errp)
+     g_autoptr(QDict) summary = qobject_to(QDict, qobject_from_json(progress, errp));
+     g_autoptr(GString) text = NULL;
+     if (!summary) { return NULL; }
++    /* Firmware summaries compare across migration. Disposable host profiling
++     * stays in progress and must not look like persistent phone state. */
++    qdict_del(summary, "host_profile");
+     if (s->stop) { qdict_put(summary, "stop", qobject_ref(s->stop)); }
+     text = qobject_to_json(QOBJECT(summary));
+     return g_strdup(text->str);
+diff --git a/hw/arm/db2010-panel.c b/hw/arm/db2010-panel.c
+index 5c29fb6..cb8585c 100644
+--- a/hw/arm/db2010-panel.c
++++ b/hw/arm/db2010-panel.c
+@@ -65,12 +65,25 @@ static const char *dbpanel_validate_dma(DB2010Panel *p, unsigned bytes)
+ 
+ static void dbpanel_stream_pixels(DB2010Panel *p, const uint8_t *data, unsigned bytes)
+ {
+-    for (unsigned i = 0; i < bytes; i += 2) {
+-        unsigned x = p->cursor & 255, y = p->cursor >> 8, offset = y * 176 + x;
+-        memcpy(p->pixels + offset * 2, data + i, 2);
+-        if (!p->pixel_known[offset]) { p->pixel_known[offset] = 1; p->known_pixels++; }
+-        if (++x == 176) { x = 0; if (++y == 220) { y = 0; } }
++    unsigned remaining = (bytes + 1) / 2;
++    while (remaining) {
++        unsigned x = p->cursor & 255, y = p->cursor >> 8;
++        unsigned count = MIN(remaining, 176 - x), offset = y * 176 + x;
++        /* Every native burst still occurs at its original deadline. Copy its
++         * contiguous RGB565 span together, splitting at retained GRAM rows.
++         * Once all pixels are known, no per-pixel provenance update remains. */
++        memcpy(p->pixels + offset * 2, data, count * 2);
++        if (p->known_pixels != DBPANEL_PIXELS) {
++            for (unsigned i = 0; i < count; i++) {
++                if (!p->pixel_known[offset + i]) {
++                    p->pixel_known[offset + i] = 1; p->known_pixels++;
++                }
++            }
++        }
++        x += count;
++        if (x == 176) { x = 0; if (++y == 220) { y = 0; } }
+         p->cursor = (y << 8) | x;
++        remaining -= count; data += count * 2;
+     }
+ }
+ 

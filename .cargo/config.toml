@@ -1,0 +1,8 @@
+[build]
+target-dir = "build/native"
+jobs = 2
+
+[env]
+CMAKE_TOOLCHAIN_FILE_aarch64-linux-android = { value = "frontends/android/build-support/cmake/android-arm64-v8a.toolchain.cmake", relative = true, force = false }
+UNICORN_NO_PKG_CONFIG = { value = "1", force = true }
+

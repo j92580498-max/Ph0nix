@@ -1,0 +1,10 @@
+* text=auto eol=lf
+*.patch -text
+*.png -text
+*.jpg -text
+*.zip -text
+*.bin -text
+*.le16 -text
+*.glb -text
+*.mp3 -text
+*.bat text eol=crlf

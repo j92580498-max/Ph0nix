@@ -1,0 +1,14 @@
+{
+  "source_main_payload_sha256": "50fa19d1de377197b7312b87f37ebac6c2895276c1ef9440e95705171386e635",
+  "source": "K750 R1DB001 CID49 original MAIN; polled I2C initialization and its original controller literal",
+  "initialize": {
+    "start": 1152104578,
+    "end": 1152104598,
+    "sha256": "4f32f569985915a4a6f97d0f319db71e1fd42b3c730a99fba67e588ac81a687b",
+    "hex": "1e48042101806021841c2180811e00240c800480"
+  },
+  "literal": {
+    "address": 1152104700,
+    "hex": "020004f9"
+  }
+}

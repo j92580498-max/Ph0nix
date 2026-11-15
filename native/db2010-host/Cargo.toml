@@ -1,0 +1,29 @@
+[package]
+name = "db2010-host"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "Portable native QEMU transport and authenticated K750 preparation"
+publish = false
+
+[dependencies]
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
+quick-xml = "0.41"
+fatfs = { version = "0.3.6", default-features = false, features = ["std", "alloc"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading = "0.8"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Networking_WinSock", "Win32_Devices_Bluetooth", "Win32_System_Com"] }
+
+[[bin]]
+name = "db2010-host-check"
+path = "src/check.rs"

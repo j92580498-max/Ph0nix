@@ -1,0 +1,13 @@
+J2ME-Loader UI base: nikita36078/J2ME-Loader, Apache License 2.0.
+https://github.com/nikita36078/J2ME-Loader
+Revision afffdde4e677b3d5ef516e713732abc488f19fc0.
+Library structure, list/grid item layouts and search/view/sort/profile menus are adapted for firmware collections. J2ME-Loader's MIDlet runtime is not included.
+
+PocketHLE: library theme and vector drawables, Apache-2.0 or MIT.
+SamsungE380-Emu: Samsung research profiles and desktop/JNI foundations, Apache-2.0 or MIT; Unicorn Engine 2.1.5 includes GPL-2.0 QEMU code.
+DB2010 QEMU engine and native host: GPL-2.0-or-later. GLib: LGPL-2.1-or-later. libffi: MIT. PCRE2: BSD-3-Clause. libiconv: LGPL-2.1-or-later. zlib: zlib license.
+OpenCORE AMR-NB decoder: Apache-2.0, derived from the Google Android OpenCORE project. Selected sources from BelledonneCommunications/opencore-amr revision 3b67218fb8efb776bcd79e7445774e02d778321d.
+AndroidX, Material Components and Kotlin retain their upstream licenses.
+Native FAT16 images: fatfs 0.3.6, MIT. OBEX XML listings: quick-xml 0.41.0, MIT.
+
+License texts are included in assets/licenses. Build inputs, exact source revisions and build instructions are provided in the project source. Imported MAIN/FS firmware is supplied by the user.

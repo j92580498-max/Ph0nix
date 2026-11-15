@@ -1,0 +1,118 @@
+diff --git a/hw/arm/db2010-dsp-peer.c b/hw/arm/db2010-dsp-peer.c
+--- a/hw/arm/db2010-dsp-peer.c
++++ b/hw/arm/db2010-dsp-peer.c
+@@ -145,6 +145,7 @@
+     if (p->config.wire10) {
+         qdict_put_int(r, "mailbox_only_messages", p->state.message_requests);
+         qdict_put_bool(r, "mailbox_only_current", p->state.mailbox_only);
++        qdict_put_bool(r, "drain_tx_pending", p->state.drain_tx_pending);
+     }
+     qdict_put_bool(r, "synthetic", true);
+     qdict_put_bool(r, "DSP_execution_modeled", false);
+@@ -320,6 +321,17 @@
+     return fault;
+ }
+ 
++static bool empty_flush_reply_pending(DB2010DspPeer *p)
++{
++    DB2010AudioRuntime *a = &p->state.audio;
++    return p->config.mma_drain && p->state.phase == DBDSP_RX_WAIT &&
++        p->state.rx_ready && p->state.rx_inline && a->rx_kind == 1 &&
++        p->state.rx_mailbox[0] == 0x180a && p->state.rx_mailbox[1] == 0x0204 &&
++        !p->state.rx_mailbox[2] && p->state.rx_mailbox[3] == 20 &&
++        !a->active && !a->pcm_frames && !a->input_bytes &&
++        !a->credit && !p->state.ring4_buffered_words;
++}
++
+ const char *dsp_peer_submit_fault(DB2010FaLink *s)
+ {
+     DB2010FaMailbox *m = &s->fa_mailbox;
+@@ -327,7 +339,10 @@
+     /* The separate wire10 path transmits framed application bytes in the
+      * mailbox itself. dbfm_access already checked count and all known words.
+      * Completion acknowledges transport only, never an application result. */
+-    if (p->config.wire10 && p->state.phase == DBDSP_DONE &&
++    bool empty_reply_drain = empty_flush_reply_pending(p) &&
++        m->words[0] == 0x100a && m->words[2] == 20 &&
++        (m->words[1] == 0x0704 || m->words[1] == 0x0104);
++    if (p->config.wire10 && (p->state.phase == DBDSP_DONE || empty_reply_drain) &&
+         ((p->config.wire10 == 2 && (m->words[0] & 0x7ff) == 10) ||
+          (p->config.wire10 == 1 && (m->known & 15) == 15 &&
+           m->words[0] == 0x180a && m->words[1] == 0x0300 &&
+@@ -1136,7 +1151,12 @@
+             p->state.length = e->length; p->state.bytes = 0; p->state.logical = e->logical;
+             p->state.dma_messages++;
+         }
+-        p->state.phase = DBDSP_MAILBOX_PENDING;
++        /* TX and RX are independent mailbox slots. Tennis can repeat an
++         * empty ring flush or unregister its drained writer while the
++         * zero-credit reply is queued for ARM. Keep that RX envelope and
++         * credit ownership while acknowledging the drain TX normally. */
++        if (empty_flush_reply_pending(p)) { p->state.drain_tx_pending = true; }
++        else { p->state.phase = DBDSP_MAILBOX_PENDING; }
+         p->state.due = e->now + p->config.latency; p->state.requests++;
+         return;
+     case DBDSP_ACK_STATUS:
+@@ -1145,6 +1165,15 @@
+         return;
+     case DBDSP_TICK:
+         if (e->now < p->state.due) { return; }
++        if (p->state.drain_tx_pending) {
++            p->state.drain_tx_pending = false;
++            if (e->link->fa_mailbox.words[1] == 0x0104) {
++                p->state.ring4_registered = false;
++            }
++            dbfm_consumed(&e->link->fa_mailbox);
++            p->state.mailbox_events++;
++            p->state.status |= 1;
++        }
+         switch (p->state.phase) {
+         case DBDSP_MAILBOX_PENDING: dbdsp_mailbox_complete(p, e); return;
+         case DBDSP_DMA: dbdsp_dma_word(p, e); return;
+@@ -1329,8 +1358,9 @@
+ 
+ int64_t dbdsp_deadline(DB2010DspPeer *p)
+ {
+-    int64_t due = p->state.phase != DBDSP_IDLE && p->state.phase != DBDSP_DONE &&
+-        p->state.phase != DBDSP_RX_WAIT ? p->state.due : -1;
++    int64_t due = p->state.drain_tx_pending ||
++        (p->state.phase != DBDSP_IDLE && p->state.phase != DBDSP_DONE &&
++         p->state.phase != DBDSP_RX_WAIT) ? p->state.due : -1;
+     if (p->config.midi_setup) {
+         DB2010MidiStream *m = &p->state.midi;
+         int64_t midi_due = db2010_midi_stream_deadline(m);
+diff --git a/hw/arm/db2010-dsp-peer.h b/hw/arm/db2010-dsp-peer.h
+--- a/hw/arm/db2010-dsp-peer.h
++++ b/hw/arm/db2010-dsp-peer.h
+@@ -53,6 +53,7 @@
+     uint64_t total_bytes;
+     uint64_t message_requests;
+     uint64_t due;
++    bool drain_tx_pending;
+     uint64_t requests;
+     uint64_t mailbox_events;
+     uint64_t transfer_events;
+diff --git a/hw/arm/db2010-checkpoint.c b/hw/arm/db2010-checkpoint.c
+--- a/hw/arm/db2010-checkpoint.c
++++ b/hw/arm/db2010-checkpoint.c
+@@ -12,7 +12,7 @@
+ #include "qemu/timer.h"
+ #include "system/runstate.h"
+ 
+-#define CHECKPOINT_VERSION 28
++#define CHECKPOINT_VERSION 29
+ 
+ typedef struct Checkpoint {
+     QEMUFile *file;
+diff --git a/hw/arm/db2010-checkpoint-fields.inc b/hw/arm/db2010-checkpoint-fields.inc
+--- a/hw/arm/db2010-checkpoint-fields.inc
++++ b/hw/arm/db2010-checkpoint-fields.inc
+@@ -199,6 +199,8 @@
+     CP_U64(v->total_bytes);
+     CP_U64(v->message_requests);
+     CP_U64(v->due);
++    if (c->version >= 29) { CP_BOOL(v->drain_tx_pending); }
++    else if (c->load) { v->drain_tx_pending = false; }
+     CP_U64(v->requests);
+     CP_U64(v->mailbox_events);
+     CP_U64(v->transfer_events);

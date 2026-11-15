@@ -1,0 +1,15 @@
+{
+  "format_version": 1,
+  "profile": "k750-r1db001-qemu-java-fallback",
+  "main_sha256": "048999c26718a39afb6bbce268b5bfee7cf70da679c8bd5010f1fd70f1eadbf2",
+  "main_patches": [
+    {
+      "address": 1141010736,
+      "original_hex": "c04991e8",
+      "value_hex": "2c119fe5",
+      "reason": "Reload the Java context pointer after a C array helper clobbers caller-saved R1. The following original LDM restores the context. QEMU runs the firmware's software fallback because Jazelle bytecode execution is not implemented.",
+      "copied_ram_address": 1275088176
+    }
+  ],
+  "input_images_modified": false
+}

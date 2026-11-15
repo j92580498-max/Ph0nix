@@ -1,0 +1,44 @@
+{
+  "format_version": 1,
+  "verification": "native app QMP transport, cold-boot preparation followed by save/resume and guest keypad contacts",
+  "native_engine_commit": "0e1b026cf74a271e04fecc8922998885e6c9181c",
+  "compatibility_bundle_sha256": "c6e4e077f56265174683f09b5630a5ea90b27e0f9c8fd703e100a0a6136939f3",
+  "frames": [
+    {
+      "tab": "General",
+      "pixel_format": "rgb565-be",
+      "width": 176,
+      "height": 220,
+      "sha256": "8c881aa27b5d63b765888aff43bfcc847436b7b3c9b2730360c7b0d75d42d677"
+    },
+    {
+      "tab": "Sounds & alerts",
+      "pixel_format": "rgb565-be",
+      "width": 176,
+      "height": 220,
+      "sha256": "67a6a04da7ced618fd94a0dd7404c3a6b5bc77da57d3f3e67d5ae63c8805d67e"
+    },
+    {
+      "tab": "Display",
+      "pixel_format": "rgb565-be",
+      "width": 176,
+      "height": 220,
+      "sha256": "e7087343b7507cbe864c4aa4de05ac031a8ce1421b1157ba5f6b92c9bef2bb38"
+    },
+    {
+      "tab": "Calls",
+      "pixel_format": "rgb565-be",
+      "width": 176,
+      "height": 220,
+      "sha256": "6fd94b5211dd8b4af0cf5a53cbbf1f83c82ed2224b17483a97fde14ead295072"
+    },
+    {
+      "tab": "Connectivity",
+      "pixel_format": "rgb565-be",
+      "width": 176,
+      "height": 220,
+      "sha256": "550f0e40f2cd750ddd1d8c4c42574325b203dd8ee929b173140217a9bb874bcb"
+    }
+  ],
+  "native_test_count": 19
+}

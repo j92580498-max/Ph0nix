@@ -1,0 +1,33 @@
+{
+  "run": "build/k750-main-screen/41-five-minute-startup",
+  "capture": "build/k750-main-screen/41-five-minute-startup/final",
+  "research_guards": false,
+  "counter_kind": "qemu-icount",
+  "guest_seconds": 303.283206144,
+  "observations": 597975615,
+  "lcd_updates": 14,
+  "panel": {
+    "started": 592633816,
+    "height": 220,
+    "known_pixels": 38720,
+    "frames": 14,
+    "completed": 592638655,
+    "width": 176,
+    "pixel_format": "rgb565-be"
+  },
+  "nonblack_pixels": 1500,
+  "colors": 2,
+  "frame_sha256": "1ec3e12711143c3b7a1df1714a953ac9e06de3a8c92c456ded3781ac41ad3690",
+  "png_sha256": "e1123723aad66016b0a30c2b28c991baecef796b08053636dcd0d7830f72a737",
+  "checkpoint_sha256": "c5bce0ad35c5f817091cc17e3ed70436eb3a9f15aed35c8f12f7e5538864dcec",
+  "engine_source_commit": "7b0a047ea6b9dd7a6088625de3227d532c9d34ed",
+  "engine_binary_sha256": "d0a8350ed3b32f19016cb4015de1e1cfd241c7bfaa73643f4001719b4abd3912",
+  "wake_observation": {
+    "run": "build/k750-main-screen/42-wake-clock",
+    "contact": "back",
+    "transitions": 4,
+    "lcd_updates_after_back": 15,
+    "screen_after_back": "Please wait"
+  },
+  "scope": "Native clock screensaver in default execution mode and native Back-contact wake; full handset startup still waits at InitBook_Customization_Page."
+}

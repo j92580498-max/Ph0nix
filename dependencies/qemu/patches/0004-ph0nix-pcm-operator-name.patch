@@ -1,0 +1,438 @@
+diff --git a/hw/arm/db2010-audio-codec.c b/hw/arm/db2010-audio-codec.c
+index 0b279a9956177e4db5d9b1b9d594cacfa5519bb0..a1fcca6937531056f8a90c142519ebd5742f902b 100644
+--- a/hw/arm/db2010-audio-codec.c
++++ b/hw/arm/db2010-audio-codec.c
+@@ -16,6 +16,7 @@ static bool layer3_header(const uint8_t *b)
+ 
+ unsigned db2010_audio_frame_bytes(DB2010AudioRuntime *a)
+ {
++    if (a->source_codec == 3) { return 2; }
+     if (a->source_codec == 2) {
+         if (!a->input_bytes) { return 1; }
+         unsigned bytes = db2010_amr_nb_frame_bytes(a->input[0]);
+@@ -98,10 +99,43 @@ static const char *amr_decode(DB2010AudioRuntime *a)
+     return NULL;
+ }
+ 
++static const char *pcm_decode(DB2010AudioRuntime *a)
++{
++    if (a->source_rate != 8000 || a->source_channels != 1) {
++        return "dsp_peer_audio_source_format_unmodeled";
++    }
++    if (a->eof && !a->input_bytes) {
++        a->pcm_frames = db2010_audio_resample(&a->resampler, NULL, 0, a->pcm, true, 8000);
++        return NULL;
++    }
++    /* The original WAV reader expands each unsigned source byte to a
++     * little-endian halfword (byte - 127). Captured Pool ring data matches
++     * every source sample. Its format0 option1 retains eight-bit precision;
++     * scale and saturate that native signed value for 16-bit presentation.
++     * Decode at most 20ms per tick, preserving input and resampler state. */
++    unsigned frames = MIN(a->input_bytes / 2, 160);
++    if (!frames) { return NULL; }
++    int16_t stereo[320];
++    for (unsigned i = 0; i < frames; i++) {
++        int sample = (int16_t)(a->input[i * 2] | (a->input[i * 2 + 1] << 8));
++        if (sample < -127 || sample > 128) {
++            return "dsp_peer_pcm_source_sample_unmodeled";
++        }
++        sample = MIN(sample * 256, INT16_MAX);
++        stereo[i * 2] = stereo[i * 2 + 1] = sample;
++    }
++    a->pcm_frames = db2010_audio_resample(&a->resampler, stereo, frames, a->pcm, false, 8000);
++    a->frames_decoded++;
++    a->input_bytes -= frames * 2;
++    memmove(a->input, a->input + frames * 2, a->input_bytes);
++    return NULL;
++}
++
+ const char *db2010_audio_decode(DB2010AudioRuntime *a)
+ {
+     if (a->source_codec == 1) { return aac_decode(a); }
+     if (a->source_codec == 2) { return amr_decode(a); }
++    if (a->source_codec == 3) { return pcm_decode(a); }
+     if (a->source_codec) { return "dsp_peer_audio_source_format_unmodeled"; }
+     unsigned rate = a->source_rate ? a->source_rate : 48000;
+     unsigned channels = a->source_channels ? a->source_channels : 2;
+diff --git a/hw/arm/db2010-audio-codec.h b/hw/arm/db2010-audio-codec.h
+index 157c4d691393ffa81201eadc1d1015b987781b41..afd191413463b9a2ad4f5d99851b1359bba8448e 100644
+--- a/hw/arm/db2010-audio-codec.h
++++ b/hw/arm/db2010-audio-codec.h
+@@ -25,7 +25,7 @@ typedef struct DB2010AudioRuntime {
+     bool active, eof, completed, credit_notify;
+     bool interrupted;
+     bool paused;
+-    unsigned source_codec; /* 0: Layer III; 1: AAC-LC; 2: AMR-NB. */
++    unsigned source_codec; /* 0: Layer III; 1: AAC-LC; 2: AMR-NB; 3: native PCM8. */
+     union {
+         DB2010AacLc aac;
+         DB2010AmrNb amr;
+diff --git a/hw/arm/db2010-checkpoint-fields.inc b/hw/arm/db2010-checkpoint-fields.inc
+index cfd68b5a38cf051439d2329e69dfb5fd6c2a596e..9ba53b757c47ba06305b6b05bafda79b7f01c749 100644
+--- a/hw/arm/db2010-checkpoint-fields.inc
++++ b/hw/arm/db2010-checkpoint-fields.inc
+@@ -297,10 +297,11 @@ static void cp_DB2010DspPeerRuntime(Checkpoint *c, DB2010DspPeerRuntime *v)
+         for (unsigned i = 0; i < 1024; i++) { CP_U32(a->aac.overlap[ch][i]); }
+         if (a->aac.window_shape[ch] > 1) { c->invalid = true; }
+     }
+-    if (a->source_codec > 2 || (a->source_codec == 1 &&
++    if (a->source_codec > 3 || (a->source_codec == 1 &&
+         (a->source_rate != 16000 || a->source_channels != 2)) ||
+         (a->source_codec == 2 && (a->source_rate != 8000 || a->source_channels != 1 ||
+           !db2010_amr_nb_state_valid(&a->amr))) ||
++        (a->source_codec == 3 && (a->source_rate != 8000 || a->source_channels != 1)) ||
+         (a->aac.primed && ((a->source_codec != 1 && a->source_codec != 2) || !a->frames_decoded))) {
+         c->invalid = true;
+     }
+diff --git a/hw/arm/db2010-checkpoint.c b/hw/arm/db2010-checkpoint.c
+index 19740153b9f7b543bea3b034dbc531109ed5e561..509fc3c6343c08485b9101b75c41b86195896559 100644
+--- a/hw/arm/db2010-checkpoint.c
++++ b/hw/arm/db2010-checkpoint.c
+@@ -390,6 +390,7 @@ static void checkpoint_running(void *opaque, bool running, RunState state)
+     DB2010MachineState *s = opaque;
+     if (!running || !s->checkpoint_loaded) { return; }
+     s->checkpoint_loaded = false;
++    db2010_apply_operator_brand(s);
+     /* CPU/RAM/virtual clock and connections are now all restored. Derive native
+      * deadlines and CPU IRQ from saved latches without consuming device events. */
+     dbtimer_update_irq(s->timer);
+diff --git a/hw/arm/db2010-dsp-peer.c b/hw/arm/db2010-dsp-peer.c
+index 7052c9120b941912cb7e7e521e91331b1d6b1be8..b3f1fb97e8d644dddb1cd7e84afd47f2bfb1deeb 100644
+--- a/hw/arm/db2010-dsp-peer.c
++++ b/hw/arm/db2010-dsp-peer.c
+@@ -155,14 +155,17 @@ QDict *dbdsp_snapshot(DB2010DspPeer *p)
+         if (p->config.mma_playback) {
+             DB2010AudioRuntime *a = &p->state.audio;
+             qdict_put_bool(r, "audio_playback_modeled", true);
+-            qdict_put_str(r, "audio_processing", a->source_codec == 2 ?
++            qdict_put_str(r, "audio_processing", a->source_codec == 3 ?
++                          "host-native-pcm8-mode0-virtual-clock" : a->source_codec == 2 ?
+                           "host-fixed-opencore-amr-nb-mode0-virtual-clock" : a->source_codec == 1 ?
+                           "host-fixed-faad2-aac-lc-mode0-virtual-clock" :
+                           "host-scalar-minimp3-layer3-mode0-virtual-clock");
+-            qdict_put_str(r, "audio_source_codec", a->source_codec == 2 ? "amr-nb" : a->source_codec == 1 ? "aac-lc" : "layer3");
++            qdict_put_str(r, "audio_source_codec", a->source_codec == 3 ? "pcm" : a->source_codec == 2 ? "amr-nb" : a->source_codec == 1 ? "aac-lc" : "layer3");
+             qdict_put_bool(r, "audio_aac_primed", a->source_codec == 1 && a->aac.primed);
+             if (a->source_codec == 2) {
+                 qdict_put_bool(r, "audio_amr_primed", a->amr.primed);
++            }
++            if (a->source_codec == 2 || a->source_codec == 3) {
+                 GString *input = g_string_sized_new(a->input_bytes * 2);
+                 for (unsigned i = 0; i < a->input_bytes; i++) { g_string_append_printf(input, "%02x", a->input[i]); }
+                 qdict_put_str(r, "audio_pending_input_hex", input->str); g_string_free(input, true);
+@@ -399,7 +402,17 @@ const char *dsp_peer_submit_fault(DB2010FaLink *s)
+                 return "dsp_peer_mma_buffer_lifecycle_unmodeled";
+             }
+             if (p->config.mma_setup && m->words[1] == 0x0e00) {
+-                if (m->words[4] == 5) {
++                if (m->words[4] == 0) {
++                    /* Captured 3D Pool PCM setup: 8kHz mono, format0,
++                     * with the native one-byte source format option. */
++                    static const uint16_t pcm[] = {
++                        0x0e00, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
++                        0xffff, 0xffff, 0xffff, 0, 0, 0xffff, 1, 1, 0xcc00, 18
++                    };
++                    if (count != ARRAY_SIZE(pcm) || memcmp(m->words + 1, pcm, sizeof(pcm))) {
++                        return "dsp_peer_mma_setup_unmodeled";
++                    }
++                } else if (m->words[4] == 5) {
+                     /* Authenticated K750 Super Real Tennis AMR-NB setup:
+                      * 8kHz mono, native format5 and its three extra options.
+                      * This accepts the complete captured serializer packet. */
+@@ -876,11 +889,11 @@ static void dbdsp_mailbox_complete(DB2010DspPeer *p, const DB2010DspEvent *e)
+                 p->state.phase = DBDSP_RX_WAIT;
+                 p->state.mma_requests++;
+                 if (p->config.mma_buffer) { p->state.mma_configured = true; }
+-                p->state.audio.source_rate = s->fa_mailbox.words[4] == 5 ? 8000 : s->fa_mailbox.words[2] == 3 ? 16000 :
++                p->state.audio.source_rate = (s->fa_mailbox.words[4] == 0 || s->fa_mailbox.words[4] == 5) ? 8000 : s->fa_mailbox.words[2] == 3 ? 16000 :
+                     s->fa_mailbox.words[2] == 4 ? 22050 :
+                     s->fa_mailbox.words[2] == 7 ? 44100 : 48000;
+                 p->state.audio.source_channels = s->fa_mailbox.words[3] + 1;
+-                p->state.audio.source_codec = s->fa_mailbox.words[4] == 5 ? 2 : s->fa_mailbox.words[2] == 3 ? 1 : 0;
++                p->state.audio.source_codec = s->fa_mailbox.words[4] == 0 ? 3 : s->fa_mailbox.words[4] == 5 ? 2 : s->fa_mailbox.words[2] == 3 ? 1 : 0;
+                 p->state.audio.coefficient_ready = false;
+             } else {
+                 dbdsp_mma_mode(p, s->fa_mailbox.words[2], e->now);
+diff --git a/hw/arm/db2010-internal.h b/hw/arm/db2010-internal.h
+index 14879844310aa936d888c1610b4c82da6c75bbaa..bc7f2026c4d992e12148966226df6f24c37de7d9 100644
+--- a/hw/arm/db2010-internal.h
++++ b/hw/arm/db2010-internal.h
+@@ -203,6 +203,7 @@ char *get_checkpoint_layout(Object *obj, Error **errp);
+ void set_flash_byte_export(Object *obj, const char *value, Error **errp);
+ void db2010_checkpoint_prepare(DB2010MachineState *s, QDict *state);
+ void db2010_checkpoint_register(DB2010MachineState *s);
++bool db2010_apply_operator_brand(DB2010MachineState *s);
+ void db2010_time_connect(DB2010MachineState *s);
+ void db2010_async_stop(DB2010MachineState *s, const char *reason, uint32_t address, unsigned size);
+ void db2010_qom_create(DB2010MachineState *s);
+diff --git a/hw/arm/db2010-operator-name.S b/hw/arm/db2010-operator-name.S
+new file mode 100644
+index 0000000000000000000000000000000000000000..482de4208fc4ee2df0638fee4fdbc104b0cee9b5
+--- /dev/null
++++ b/hw/arm/db2010-operator-name.S
+@@ -0,0 +1,95 @@
++/* K750 R1DB001 native standby branding, executed by the guest ARM926.
++ * The original StatusIndication renderer still draws and centers the text.
++ * SPDX-License-Identifier: GPL-2.0-or-later
++ * Assemble for armv5te/thumb and link .text at 0x44018000. */
++.syntax unified
++.arch armv5te
++.thumb
++.section .text
++.balign 4
++.global ph0nix_operator_redraw
++.thumb_func
++ph0nix_operator_redraw:
++    push {r0, r1, r2, r4, r5, r6, r7, lr}
++    cmp r0, #0
++    beq original_redraw
++    movs r3, #0xcc
++    ldr r5, [r0, r3]              /* StatusIndication layout */
++    cmp r5, #0
++    beq original_redraw
++    ldr r6, [r5, #0x78]           /* 12-byte text records */
++    cmp r6, #0
++    beq original_redraw
++    ldr r0, [r6, #16]             /* Primary operator field, item 1 */
++    lsrs r1, r0, #24
++    cmp r1, #0x80                 /* Borrowed UCS2 TextID */
++    beq check_name
++    cmp r1, #0x88                 /* Owned UCS2 TextID */
++    bne create_name
++check_name:
++    lsls r0, r0, #8
++    lsrs r0, r0, #8
++    ldr r3, =0x44eeb4ad           /* TextID descriptor lookup */
++    blx r3
++    cmp r0, #0
++    beq create_name
++    ldrh r1, [r0, #8]
++    cmp r1, #6
++    bne create_name
++    ldr r0, [r0, #4]
++    cmp r0, #0
++    beq create_name
++    ldr r1, [r0]
++    ldr r2, =0x00680070           /* p h */
++    cmp r1, r2
++    bne create_name
++    ldr r1, [r0, #4]
++    ldr r2, =0x006e0030           /* 0 n */
++    cmp r1, r2
++    bne create_name
++    ldr r1, [r0, #8]
++    ldr r2, =0x00780069           /* i x */
++    cmp r1, r2
++    beq clear_status
++create_name:
++    adr r0, operator_text
++    movs r1, #0                   /* ENC_UCS2 */
++    movs r2, #6
++    ldr r3, =0x44eebddd           /* TextID_Create */
++    blx r3
++    ldr r1, =0x6fffffff           /* EMPTY_TEXTID / allocation failure */
++    cmp r0, r1
++    beq original_redraw
++    movs r2, r0
++    movs r0, r5
++    movs r1, #1
++    movs r3, #0                   /* Already inside a redraw: no invalidation */
++    ldr r7, =0x44e7fc85           /* Layout_SetItemText, consumes the TextID */
++    blx r7
++clear_status:
++    ldr r2, [r6, #28]             /* Searching / inactive SIM fallback, item 2 */
++    ldr r1, =0x6fffffff
++    cmp r2, r1
++    beq original_redraw
++    movs r2, r1
++    movs r0, r5
++    movs r1, #2
++    movs r3, #0
++    ldr r7, =0x44e7fc85
++    blx r7
++original_redraw:
++    pop {r0, r1, r2, r4, r5, r6, r7}
++    pop {r3}
++    mov lr, r3
++    /* Reproduce the eight replaced bytes, including the condition flags. */
++    push {r1, r4, r5, r6, lr}
++    adds r4, r0, #0
++    adds r6, r2, #0
++    cmp r0, #0
++    ldr r3, =0x44e98c01
++    bx r3
++.balign 4
++operator_text:
++    .hword 0x0070, 0x0068, 0x0030, 0x006e, 0x0069, 0x0078, 0
++.balign 4
++.ltorg
+diff --git a/hw/arm/db2010-operator-name.c b/hw/arm/db2010-operator-name.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..31428d00be00e6914da427075a2ab02aa220f49f
+--- /dev/null
++++ b/hw/arm/db2010-operator-name.c
+@@ -0,0 +1,65 @@
++/* Revision-checked native K750 standby customization.
++ * Firmware input files and other handset renderers are never rewritten.
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++#include "qemu/osdep.h"
++#include "db2010-internal.h"
++#include "db2010-operator-name.inc"
++
++#define OPERATOR_HELPER_ADDRESS 0x44018000u
++#define OPERATOR_REDRAW_ADDRESS 0x44e98bf8u
++
++bool db2010_apply_operator_brand(DB2010MachineState *s)
++{
++    /* R1DB001 native apps authenticate MAIN before mapping it. Keep the
++     * guarded research runner and unrelated firmware revisions intact. */
++    if (s->research_guards || !s->has_nor || !s->has_simif) { return false; }
++    DB2010Region *r = find_region(s, OPERATOR_HELPER_ADDRESS,
++                                OPERATOR_REDRAW_ADDRESS - OPERATOR_HELPER_ADDRESS + 24);
++    if (!r || !r->readonly || r->base != 0x44000000 || r->size != 0x2000000) {
++        return false;
++    }
++    uint8_t *bytes = memory_region_get_ram_ptr(r->mr);
++    static const struct {
++        uint32_t address;
++        uint8_t bytes[12];
++    } witnesses[] = {
++        {0x44eeb4ac, {0x11,0xb5,0x04,0x1c,0x09,0x48,0x00,0x68,0x00,0x90,0x20,0x0a}},
++        {0x44eebddc, {0xf4,0xb5,0x04,0x1c,0x4f,0x48,0x05,0x1c,0x00,0x2c,0x83,0xb0}},
++        {0x44e7fc84, {0xf2,0xb5,0x82,0xb0,0x04,0x1c,0x15,0x1c,0x1e,0x1c,0x00,0x27}},
++        {0x44e98c00, {0x05,0xd1,0xff,0x21,0x89,0x1d,0x28,0x48,0x20,0xf4,0x1e,0xf9}},
++    };
++    for (unsigned i = 0; i < ARRAY_SIZE(witnesses); i++) {
++        unsigned offset = witnesses[i].address - r->base;
++        for (unsigned j = 0; j < sizeof(witnesses[i].bytes); j++) {
++            if (r->known[offset + j] != 1 ||
++                bytes[offset + j] != witnesses[i].bytes[j]) { return false; }
++        }
++    }
++    static const uint8_t original[] = {0x72,0xb5,0x04,0x1c,0x16,0x1c,0x00,0x28};
++    /* ldr r3,[pc,#0]; bx r3; .word 0x44018001 */
++    static const uint8_t replacement[] = {0x00,0x4b,0x18,0x47,0x01,0x80,0x01,0x44};
++    unsigned redraw = OPERATOR_REDRAW_ADDRESS - r->base;
++    bool installed = !memcmp(bytes + redraw, replacement, sizeof(replacement));
++    if (!installed && memcmp(bytes + redraw, original, sizeof(original))) { return false; }
++    for (unsigned i = 0; i < sizeof(original); i++) {
++        if (r->known[redraw + i] != 1) { return false; }
++    }
++    unsigned helper = OPERATOR_HELPER_ADDRESS - r->base;
++    /* The helper occupies an unseeded NOR prefix before MAIN's first record
++     * at 0x44020000. A restored copy must match this exact published helper. */
++    for (unsigned i = 0; i < sizeof(operator_redraw_code); i++) {
++        if (r->known[helper + i] == 1) {
++            if (!installed || bytes[helper + i] != operator_redraw_code[i]) { return false; }
++        } else if (bytes[helper + i] != 0 && bytes[helper + i] != 0xff) {
++            return false;
++        }
++    }
++    memcpy(bytes + helper, operator_redraw_code, sizeof(operator_redraw_code));
++    memset(r->known + helper, 1, sizeof(operator_redraw_code));
++    memcpy(bytes + redraw, replacement, sizeof(replacement));
++    /* Also invalidate translations when resuming an older native checkpoint,
++     * including a NOR device temporarily outside ROMD array mode. */
++    memory_region_flush_rom_device(r->mr, helper, sizeof(operator_redraw_code));
++    memory_region_flush_rom_device(r->mr, redraw, sizeof(replacement));
++    return true;
++}
+diff --git a/hw/arm/db2010-operator-name.inc b/hw/arm/db2010-operator-name.inc
+new file mode 100644
+index 0000000000000000000000000000000000000000..5b278bd127e64cda5cc0c0a985c6dc17555f2198
+--- /dev/null
++++ b/hw/arm/db2010-operator-name.inc
+@@ -0,0 +1,16 @@
++/* Generated from db2010-operator-name.S at 0x44018000. */
++static const uint8_t operator_redraw_code[] = {
++    0xf7, 0xb5, 0x00, 0x28, 0x3c, 0xd0, 0xcc, 0x23, 0xc5, 0x58, 0x00, 0x2d, 0x38, 0xd0, 0xae, 0x6f,
++    0x00, 0x2e, 0x35, 0xd0, 0x30, 0x69, 0x01, 0x0e, 0x80, 0x29, 0x01, 0xd0, 0x88, 0x29, 0x17, 0xd1,
++    0x00, 0x02, 0x00, 0x0a, 0x1f, 0x4b, 0x98, 0x47, 0x00, 0x28, 0x11, 0xd0, 0x01, 0x89, 0x06, 0x29,
++    0x0e, 0xd1, 0x40, 0x68, 0x00, 0x28, 0x0b, 0xd0, 0x01, 0x68, 0x1b, 0x4a, 0x91, 0x42, 0x07, 0xd1,
++    0x41, 0x68, 0x1a, 0x4a, 0x91, 0x42, 0x03, 0xd1, 0x81, 0x68, 0x19, 0x4a, 0x91, 0x42, 0x0d, 0xd0,
++    0x10, 0xa0, 0x00, 0x21, 0x06, 0x22, 0x17, 0x4b, 0x98, 0x47, 0x17, 0x49, 0x88, 0x42, 0x0f, 0xd0,
++    0x02, 0x00, 0x28, 0x00, 0x01, 0x21, 0x00, 0x23, 0x14, 0x4f, 0xb8, 0x47, 0xf2, 0x69, 0x12, 0x49,
++    0x8a, 0x42, 0x05, 0xd0, 0x0a, 0x00, 0x28, 0x00, 0x02, 0x21, 0x00, 0x23, 0x0f, 0x4f, 0xb8, 0x47,
++    0xf7, 0xbc, 0x08, 0xbc, 0x9e, 0x46, 0x72, 0xb5, 0x04, 0x1c, 0x16, 0x1c, 0x00, 0x28, 0x0c, 0x4b,
++    0x18, 0x47, 0xc0, 0x46, 0x70, 0x00, 0x68, 0x00, 0x30, 0x00, 0x6e, 0x00, 0x69, 0x00, 0x78, 0x00,
++    0x00, 0x00, 0xc0, 0x46, 0xad, 0xb4, 0xee, 0x44, 0x70, 0x00, 0x68, 0x00, 0x30, 0x00, 0x6e, 0x00,
++    0x69, 0x00, 0x78, 0x00, 0xdd, 0xbd, 0xee, 0x44, 0xff, 0xff, 0xff, 0x6f, 0x85, 0xfc, 0xe7, 0x44,
++    0x01, 0x8c, 0xe9, 0x44,
++};
+diff --git a/hw/arm/db2010-reset.c b/hw/arm/db2010-reset.c
+index c7280c48ed53b8f337606364e6b8fdcdd0c382a5..0d6dceb7491aac21d70bf461e585aae8181eea57 100644
+--- a/hw/arm/db2010-reset.c
++++ b/hw/arm/db2010-reset.c
+@@ -37,6 +37,7 @@ void db2010_reset(void *opaque)
+         s->tcm[i].base = 0;
+         s->tcm[i].enabled = false;
+     }
++    db2010_apply_operator_brand(s);
+     memcpy(env->regs, s->initial_registers, sizeof(env->regs));
+     env->regs[15] = s->entry;
+     cpsr_write(env, s->cpsr, UINT32_MAX, CPSRWriteRaw);
+diff --git a/hw/arm/db2010-sim-card.c b/hw/arm/db2010-sim-card.c
+index 9d2d176a187bc65c77ed11467c8681484c1cd482..0eb8bb68d40ab978d67a69f19e7a4b9f523ebb0b 100644
+--- a/hw/arm/db2010-sim-card.c
++++ b/hw/arm/db2010-sim-card.c
+@@ -54,7 +54,8 @@ void dbsim_card_init(DB2010SimCard *c)
+     c->files[13].data[10]=1; c->files[15].data[1]=1;
+     memset(c->files[16].data,0xff,12);
+     c->files[17].data[0]=1; c->files[17].data[1]=2;
+-    memset(c->files[18].data,0xff,16); memcpy(c->files[18].data,"UA-KYIVSTAR",11);
++    memset(c->files[18].data,0xff,16);
++    memcpy(c->files[18].data,DBSIM_OPERATOR_NAME,sizeof(DBSIM_OPERATOR_NAME)-1);
+     c->df=0x3f00; c->input_need=5;
+ }
+ void dbsim_card_init_ph0nix(DB2010SimCard *c)
+@@ -69,12 +70,12 @@ void dbsim_card_init_ph0nix(DB2010SimCard *c)
+     /* TS 51.011: SST service 17 (SPN) allocated and activated. */
+     c->files[8].size = 5; c->files[8].data[4] = 3;
+     memset(c->files[18].data, 0xff, 16);
+-    memcpy(c->files[18].data, "ph0nix", 6); /* CPHS operator name */
++    memcpy(c->files[18].data, DBSIM_OPERATOR_NAME, sizeof(DBSIM_OPERATOR_NAME)-1);
+     DB2010SimFile *spn = &c->files[DBSIM_LEGACY_FILES];
+     *spn = (DB2010SimFile){.parent=0x7f20,.id=0x6f46,.size=17,.structure=0};
+     memset(spn->data, 0xff, spn->size);
+     spn->data[0] = 0; /* Display SPN on the home PLMN. */
+-    memcpy(spn->data + 1, "ph0nix", 6);
++    memcpy(spn->data + 1, DBSIM_OPERATOR_NAME, sizeof(DBSIM_OPERATOR_NAME)-1);
+ }
+ static DB2010SimFile *find(DB2010SimCard *c, uint16_t id)
+ {
+diff --git a/hw/arm/db2010-sim-card.h b/hw/arm/db2010-sim-card.h
+index 7d2be93229bd4d82dd5d82615befa241e34f76de..9237976c3544bfc05671c1341d51a78eb3fd10a7 100644
+--- a/hw/arm/db2010-sim-card.h
++++ b/hw/arm/db2010-sim-card.h
+@@ -7,6 +7,7 @@
+ #define DBSIM_LEGACY_FILES 19
+ #define DBSIM_FILES 20
+ #define DBSIM_QUEUE 512
++#define DBSIM_OPERATOR_NAME "ph0nix"
+ typedef struct DB2010SimFile {
+     uint16_t parent, id, size;
+     int structure;
+diff --git a/hw/arm/db2010-simif.c b/hw/arm/db2010-simif.c
+index 0c97df092fcaa1276c8a1931bfe431a8689b930f..19c9af27c5a5795b5c6c7c130a6ce4807ff1efcf 100644
+--- a/hw/arm/db2010-simif.c
++++ b/hw/arm/db2010-simif.c
+@@ -138,6 +138,7 @@ void dbsim_export(DB2010Simif *s, QDict *snapshot)
+     QDict *out=qdict_new(); QList *history=qlist_new();
+     qdict_put_str(out,"profile","pmb7850-gsm-stub-native-simif");
+     qdict_put_str(out,"card_profile",s->ph0nix_card ? "ph0nix-test-sim" : "legacy-stub");
++    qdict_put_str(out,"operator_name",DBSIM_OPERATOR_NAME);
+     qdict_put_bool(out,"synthetic",true); qdict_put_int(out,"byte_ns",s->byte_ns);
+     if (s->has_setup_initial) { qdict_put_int(out,"setup_initial_value",s->setup_initial); }
+     else { qdict_put_null(out,"setup_initial_value"); }
+diff --git a/hw/arm/meson.build b/hw/arm/meson.build
+index 1b27dae9b084cac3ef7c3aa1d3563a381b778041..ed9a85b02f980ba888278bdccebd0a2c52f0772d 100644
+--- a/hw/arm/meson.build
++++ b/hw/arm/meson.build
+@@ -28,6 +28,7 @@ arm_common_ss.add(when: 'CONFIG_DB2010', if_true: files(
+   'db2010-keypad.c',
+   'db2010-sim-card.c',
+   'db2010-simif.c',
++  'db2010-operator-name.c',
+   'db2010-register-bank.c',
+   'db2010-memory-contracts.c',
+   'db2010-dma.c',

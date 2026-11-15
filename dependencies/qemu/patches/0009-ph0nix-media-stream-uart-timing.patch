@@ -1,0 +1,542 @@
+diff --git a/hw/arm/db2010-bus-wiring.c b/hw/arm/db2010-bus-wiring.c
+index a51154e..703beee 100644
+--- a/hw/arm/db2010-bus-wiring.c
++++ b/hw/arm/db2010-bus-wiring.c
+@@ -91,6 +91,7 @@ static void connect_components(DB2010MachineState *s)
+     s->display->stream = find_register(s, 0xf7000304);
+     s->display->memory = memory; s->display->time = time; s->display->faults = faults;
+     s->fa->dma = s->dma;
++    s->fa->dsp_peer->transfer = s->has_fa_transfer ? s->fa_transfer : NULL;
+     s->fa->mode = find_register(s, 0xfa040014);
+     s->fa->memory = memory; s->fa->time = time; s->fa->faults = faults;
+     s->dma_link = (DB2010DmaLink){s->dma, s->display, s->fa};
+diff --git a/hw/arm/db2010-checkpoint-fields.inc b/hw/arm/db2010-checkpoint-fields.inc
+index fc618e1..17f5ea6 100644
+--- a/hw/arm/db2010-checkpoint-fields.inc
++++ b/hw/arm/db2010-checkpoint-fields.inc
+@@ -217,9 +217,19 @@ static void cp_DB2010DspPeerRuntime(Checkpoint *c, DB2010DspPeerRuntime *v)
+     CP_U32(v->rx_count);
+     CP_U32(v->rx_bytes);
+     CP_U32(v->replies);
+-    for (unsigned i0 = 0; i0 < 136; i0++) {
++    for (unsigned i0 = 0; i0 < (c->version >= 30 ? 256 : 136); i0++) {
+         CP_U8(v->response[i0]);
+     }
++    if (c->version >= 30) {
++        CP_U32(v->reply_bytes); CP_U32(v->reply_logical);
++        if (v->reply_bytes > sizeof(v->response) || v->reply_bytes % 4 ||
++            v->reply_logical > 20 || v->rx_bytes > v->reply_bytes) {
++            c->invalid = true;
++        }
++    } else if (c->load) {
++        memset(v->response + 136, 0, sizeof(v->response) - 136);
++        v->reply_bytes = 136; v->reply_logical = 15;
++    }
+     CP_BOOL(v->rx_inline);
+     CP_U32(v->audio_opcode);
+     CP_U64(v->audio_requests);
+diff --git a/hw/arm/db2010-checkpoint.c b/hw/arm/db2010-checkpoint.c
+index 5ffab91..deb5a2b 100644
+--- a/hw/arm/db2010-checkpoint.c
++++ b/hw/arm/db2010-checkpoint.c
+@@ -12,7 +12,7 @@
+ #include "qemu/timer.h"
+ #include "system/runstate.h"
+ 
+-#define CHECKPOINT_VERSION 29
++#define CHECKPOINT_VERSION 32
+ 
+ typedef struct Checkpoint {
+     QEMUFile *file;
+@@ -272,6 +272,20 @@ static bool cp_machine(Checkpoint *c, DB2010MachineState *s)
+         CP_U16(u->data_mode); CP_U16(u->data_mask); CP_U16(u->data_head); CP_U16(u->data_count);
+         cp_buffer(c, u->data_rx, sizeof(u->data_rx)); CP_U8(u->data_training);
+         CP_U64(u->data_rx_bytes); CP_U64(u->data_received); CP_U64(u->data_autobauds);
++        if (c->version >= 31) {
++            CP_BOOL(u->data_idle_pending); CP_U64(u->data_idle_due);
++        } else if (c->load) {
++            u->data_idle_pending = false; u->data_idle_due = 0;
++        }
++        if (c->version >= 32) {
++            cp_buffer(c, u->data_wire_rx, sizeof(u->data_wire_rx));
++            CP_U16(u->data_wire_head); CP_U16(u->data_wire_count); CP_U64(u->data_shift_due);
++            if (u->data_wire_head >= sizeof(u->data_wire_rx) ||
++                u->data_wire_count > sizeof(u->data_wire_rx)) { return false; }
++        } else if (c->load) {
++            memset(u->data_wire_rx, 0, sizeof(u->data_wire_rx));
++            u->data_wire_head = u->data_wire_count = 0; u->data_shift_due = 0;
++        }
+         {
+             CP_BOOL(u->data_present); CP_U16(u->data_presence_events); CP_U64(u->data_cable_transitions);
+             if (u->data_presence_events & ~0x180) { return false; }
+diff --git a/hw/arm/db2010-components.h b/hw/arm/db2010-components.h
+index 0c6c7a3..93bf1c9 100644
+--- a/hw/arm/db2010-components.h
++++ b/hw/arm/db2010-components.h
+@@ -74,8 +74,17 @@ typedef struct DB2010Uart {
+     uint16_t data_mode, data_mask, data_head, data_count;
+     uint8_t data_rx[256], data_training;
+     uint64_t data_rx_bytes, data_received, data_autobauds;
++    bool data_idle_pending;
++    uint64_t data_idle_due;
++    uint8_t data_wire_rx[256];
++    uint16_t data_wire_head, data_wire_count;
++    uint64_t data_shift_due;
++    void (*data_reschedule)(void *opaque);
++    void *data_timing_opaque;
+     DB2010Signal data_irq;
+ } DB2010Uart;
++int64_t db2010_data_uart_deadline(DB2010Uart *s);
++void db2010_data_uart_advance(DB2010Uart *s, uint64_t now);
+ typedef struct DB2010MemoryController {
+     uint32_t controller_words[11];
+     uint32_t initial_bank;
+diff --git a/hw/arm/db2010-device.c b/hw/arm/db2010-device.c
+index 127501d..41a0a77 100644
+--- a/hw/arm/db2010-device.c
++++ b/hw/arm/db2010-device.c
+@@ -343,6 +343,7 @@ static void finalize_body(DB2010DeviceBody *b)
+     case DBDEV_DSP:
+         db2010_audio_output_free(((DB2010DspPeer *)b->model)->output);
+         qobject_unref(((DB2010DspPeer *)b->model)->encoded_frames);
++        qobject_unref(((DB2010DspPeer *)b->model)->service_commands);
+         break;
+     case DBDEV_UART: {
+         DB2010Uart *s = b->model;
+diff --git a/hw/arm/db2010-dsp-peer.c b/hw/arm/db2010-dsp-peer.c
+index 1e1774a..d4d2788 100644
+--- a/hw/arm/db2010-dsp-peer.c
++++ b/hw/arm/db2010-dsp-peer.c
+@@ -18,10 +18,33 @@ typedef struct DB2010DspEvent {
+ } DB2010DspEvent;
+ static void dbdsp_dispatch(DB2010DspPeer *p, const DB2010DspEvent *e);
+ static const char *dbdsp_modexp(DB2010DspPeer *p);
++static const char *dbdsp_version(DB2010DspPeer *p);
+ static void dbdsp_rx_word(DB2010DspPeer *p, const DB2010DspEvent *e);
+ static void dbdsp_audio_tick(DB2010DspPeer *p, DB2010FaLink *s, uint64_t now);
+ static void dbdsp_midi_tick(DB2010DspPeer *p, DB2010FaLink *s, uint64_t now);
+ 
++static void dbdsp_trace_command(DB2010DspPeer *p, unsigned logical,
++                                const uint8_t *data, unsigned bytes,
++                                uint64_t now)
++{
++    if (p->omit_diagnostics || logical == 20) { return; }
++    QDict *record = qdict_new();
++    GString *hex = g_string_new(NULL);
++    for (unsigned i = 0; i < bytes; i++) {
++        g_string_append_printf(hex, "%02x", data[i]);
++    }
++    qdict_put_int(record, "virtual_ns", now);
++    qdict_put_int(record, "channel", logical);
++    qdict_put_int(record, "bytes", bytes);
++    qdict_put_str(record, "payload_hex", hex->str);
++    g_string_free(hex, true);
++    qlist_append(p->service_commands, record);
++    p->service_command_count++;
++    if (qlist_size(p->service_commands) > 512) {
++        qobject_unref(qlist_pop(p->service_commands));
++    }
++}
++
+ static const char *dsp_mask_field(void *opaque, const DB2010DecodedAccess *d,
+                                  const DB2010Access *a, DB2010FieldRef *field)
+ {
+@@ -87,6 +110,12 @@ const char *dbdsp_access(DB2010DspPeer *p, uint32_t address,
+ QDict *dbdsp_snapshot(DB2010DspPeer *p)
+ {
+     QDict *r = qdict_new();
++    if (!p->omit_diagnostics && p->service_command_count) {
++        qdict_put(r, "service_commands", qobject_ref(p->service_commands));
++        qdict_put_int(r, "service_commands_total", p->service_command_count);
++        qdict_put_int(r, "service_commands_dropped",
++                     p->service_command_count - qlist_size(p->service_commands));
++    }
+     qdict_put_bool(r, "midi_setup_reply_modeled", p->config.midi_setup);
+     qdict_put_bool(r, "midi_playback_modeled", p->config.midi_setup);
+     qdict_put_bool(r, "midi_initialized", p->state.midi_initialized);
+@@ -299,6 +328,8 @@ void dbdsp_reset(DB2010DspPeer *d)
+     db2010_audio_output_reset(d->output);
+     qobject_unref(d->encoded_frames); d->encoded_frames = qlist_new();
+     d->encoded_frame_count = 0;
++    qobject_unref(d->service_commands); d->service_commands = qlist_new();
++    d->service_command_count = 0;
+     d->state = (DB2010DspPeerRuntime){0};
+ }
+ 
+@@ -821,6 +852,11 @@ static void dbdsp_mailbox_complete(DB2010DspPeer *p, const DB2010DspEvent *e)
+         p->state.phase = DBDSP_DONE;
+         unsigned count = s->fa_mailbox.payload_words;
+         unsigned logical = s->fa_mailbox.words[count];
++        uint8_t data[64];
++        for (unsigned i = 0; i < count; i++) {
++            stw_le_p(data + i * 2, s->fa_mailbox.words[i + 1]);
++        }
++        dbdsp_trace_command(p, logical, data, count * 2, e->now);
+         if (p->config.midi_setup && logical == 9) {
+             /* Uploaded DSP010EF0 rewrites0600 to0601 through the request
+              * packet register. Preserve the qualified eight-word request;
+@@ -1128,7 +1164,20 @@ static void dbdsp_transfer_complete(DB2010DspPeer *p, const DB2010DspEvent *e)
+             p->state.audio.due = e->now;
+         }
+     }
++    dbdsp_trace_command(p, p->state.logical, p->state.payload,
++                       p->state.bytes, e->now);
+     p->state.status |= 8; p->state.transfer_events++; p->state.phase = DBDSP_DONE;
++    if (p->config.modexp && p->state.logical == 2 &&
++        lduw_le_p(p->state.payload) == 0x0201 && p->transfer) {
++        const char *fault = dbdsp_version(p);
++        if (fault) {
++            db2010_link_stop(&e->link->faults, fault, p->state.source, p->state.bytes);
++            return;
++        }
++        p->state.phase = DBDSP_RX_OFFER;
++        p->state.due = e->now + p->config.latency;
++        return;
++    }
+     if (p->config.modexp && (p->state.logical == 11 || p->state.logical == 12)) {
+         const char *fault = dbdsp_audio(p, p->state.logical, p->state.payload,
+                                       p->state.bytes, false);
+@@ -1193,8 +1242,9 @@ static void dbdsp_dispatch(DB2010DspPeer *p, const DB2010DspEvent *e)
+             p->state.rx_inline = false;
+             memset(p->state.rx_mailbox, 0, sizeof(p->state.rx_mailbox));
+             p->state.rx_mailbox[0] = 0x4814; /* nine control halfwords */
+-            p->state.rx_mailbox[1] = 2; p->state.rx_mailbox[2] = 15;
+-            p->state.rx_mailbox[3] = sizeof(p->state.response) / 2;
++            p->state.rx_mailbox[1] = 2;
++            p->state.rx_mailbox[2] = p->state.reply_logical;
++            p->state.rx_mailbox[3] = p->state.reply_bytes / 2;
+             p->state.rx_mailbox[5] = 0x1000; /* declared peer-memory address */
+             p->state.rx_mailbox[6] = 8;
+             p->state.rx_ready = true; p->state.status |= 2;
+@@ -1488,6 +1538,7 @@ static const char *dbdsp_modexp(DB2010DspPeer *p)
+     unsigned used = RSA_WORDS;
+     while (used > 1 && !result[used - 1]) { used--; }
+     memset(p->state.response, 0, sizeof(p->state.response));
++    p->state.reply_bytes = 136; p->state.reply_logical = 15;
+     stw_le_p(p->state.response, 0x0b01); /* ignored by consumer; echo hypothesis */
+     stw_le_p(p->state.response + 2, used * 2 + 3);
+     stw_le_p(p->state.response + 6, result[used - 1] ? 31 - clz32(result[used - 1]) : 0xffff);
+@@ -1495,17 +1546,85 @@ static const char *dbdsp_modexp(DB2010DspPeer *p)
+     return NULL;
+ }
+ 
++static bool dsp_code_matches(DB2010FaTransfer *f, unsigned pc,
++                             const uint8_t *code, unsigned bytes)
++{
++    for (unsigned i = 0; i < bytes; i++) {
++        uint16_t word;
++        unsigned address = pc + i;
++        if (!dbfa_word(f, address / 2, &word) ||
++            (uint8_t)(word >> (address & 1 ? 0 : 8)) != code[i]) {
++            return false;
++        }
++    }
++    return true;
++}
++
++static const char *dbdsp_version(DB2010DspPeer *p)
++{
++    /* The ARM DSP manager sends 0201 in an allocated 202-byte message.
++     * Its uploaded C55x routine loads the identity address with AMAR,
++     * copies the terminated halfword string and stores 0202 in the same
++     * message. These locations were read from the original K750i uploads;
++     * no identity string or successful media result is invented here.
++     * Relocated W800 kernels use the same evidenced instructions.
++     */
++    static const struct { unsigned pc, metadata, reply_pc, channel; } kernels[] = {
++        {0x158d9, 0xb0b2, 0x15905, 0xb0f2}, /* K750i MP3 */
++        {0x15c96, 0xb2e4, 0x15cc2, 0xb32d}, /* K750i MIDI/PCM/ASR */
++        {0x15c82, 0xb2dc, 0x15cae, 0xb32a},
++        {0x15ced, 0xb2a6, 0x15d19, 0xb2eb},
++        {0x158c4, 0xb0a6, 0x158f0, 0xb0eb},
++        {0x153fc, 0xaeba, 0x15428, 0xaf03},
++        {0x1595d, 0xb30c, 0x15989, 0xb37a},
++    };
++    if (p->state.bytes < 8 || p->state.bytes > sizeof(p->state.response) ||
++        p->state.bytes % 4 ||
++        lduw_le_p(p->state.payload + p->state.bytes - 2) != 2) {
++        return "dsp_peer_version_packet_unmodeled";
++    }
++    for (unsigned k = 0; k < ARRAY_SIZE(kernels); k++) {
++        const uint8_t load[] = {0xec, 0x31, 0xbe, 0,
++            kernels[k].metadata >> 8, kernels[k].metadata & 255};
++        const uint8_t reply[] = {0xfb, 0x41, 2, 2};
++        uint16_t channel;
++        if (!dbfa_word(p->transfer, kernels[k].channel, &channel) || channel != 2 ||
++            !dsp_code_matches(p->transfer, kernels[k].pc, load, sizeof(load)) ||
++            !dsp_code_matches(p->transfer, kernels[k].reply_pc, reply, sizeof(reply))) {
++            continue;
++        }
++        memset(p->state.response, 0, sizeof(p->state.response));
++        stw_le_p(p->state.response, 0x0202);
++        for (unsigned i = 1; i < p->state.bytes / 2; i++) {
++            uint16_t character;
++            if (!dbfa_word(p->transfer, kernels[k].metadata + i - 1, &character) ||
++                character > 127) {
++                return "dsp_peer_version_identity_unmodeled";
++            }
++            stw_le_p(p->state.response + i * 2, character);
++            if (!character) {
++                p->state.reply_bytes = p->state.bytes;
++                p->state.reply_logical = 2;
++                return NULL;
++            }
++        }
++        return "dsp_peer_version_identity_unterminated";
++    }
++    return "dsp_peer_version_kernel_unmodeled";
++}
++
+ const char *dsp_peer_rx_arm_fault(void *opaque)
+ {
+     DB2010FaLink *s = opaque;
+     DB2010DspPeer *p = s->dsp_peer;
+     uint32_t *ch = s->dma->state.channel[2];
+     if (!p->config.modexp || p->state.phase != DBDSP_RX_WAIT || p->state.rx_ready ||
+-        ch[0] != 0xfa040020 || ch[2] || ch[3] != 0xa8492022 || ch[4] != 0xf0c6 ||
++        !p->state.reply_bytes || ch[0] != 0xfa040020 || ch[2] ||
++        ch[3] != (0xa8492000 | p->state.reply_bytes / 4) || ch[4] != 0xf0c6 ||
+         s->dma->state.global[4] != 1 || (s->dma->state.raw_tc & 4)) {
+         return "dsp_peer_rx_dma_configuration_unmodeled";
+     }
+-    if (ch[1] % 32 || !s->memory.write(s->memory.opaque, ch[1], NULL, 136)) {
++    if (ch[1] % 32 || !s->memory.write(s->memory.opaque, ch[1], NULL, p->state.reply_bytes)) {
+         return "dsp_peer_rx_destination_unmodeled";
+     }
+     return NULL;
+@@ -1571,7 +1690,7 @@ static const char *dsp_rx_register(void *opaque, const DB2010DecodedAccess *d, D
+             if (a->commit) { p->state.selector = a->value; } return NULL;
+         }
+         if (a->value != 0x19 || p->state.phase != DBDSP_RX_WAIT || p->state.rx_ready ||
+-            p->state.rx_address != 0x1000 || p->state.rx_count != 34 ||
++            p->state.rx_address != 0x1000 || p->state.rx_count != p->state.reply_bytes / 4 ||
+             s->dma->state.channel[2][4] != 0xf0c7) {
+             return "dsp_peer_rx_start_unmodeled";
+         }
+@@ -1581,7 +1700,8 @@ static const char *dsp_rx_register(void *opaque, const DB2010DecodedAccess *d, D
+         }
+         return NULL;
+     case 0x18: case 0x1c:
+-        if (p->state.phase != DBDSP_RX_WAIT || a->value != (d->id == 0x18 ? 0x1000 : 34)) {
++        if (p->state.phase != DBDSP_RX_WAIT ||
++            a->value != (d->id == 0x18 ? 0x1000 : p->state.reply_bytes / 4)) {
+             return "dsp_peer_rx_request_unmodeled";
+         }
+         if (a->commit) {
+@@ -1630,12 +1750,12 @@ static void dbdsp_rx_word(DB2010DspPeer *p, const DB2010DspEvent *e)
+     DB2010FaLink *s = e->link;
+     uint32_t *ch = s->dma->state.channel[2];
+     if (ch[0] != 0xfa040020 || ch[2] || ch[4] != 0xf0c7 ||
+-        ch[3] != (0xa8492000 | ((136 - p->state.rx_bytes) / 4)) ||
++        ch[3] != (0xa8492000 | ((p->state.reply_bytes - p->state.rx_bytes) / 4)) ||
+         !s->memory.write(s->memory.opaque, ch[1], p->state.response + p->state.rx_bytes, 4)) {
+         db2010_link_stop(&s->faults, "dsp_peer_rx_dma_progress_unmodeled", ch[1], 4); return;
+     }
+     ch[1] += 4; ch[3]--; p->state.rx_bytes += 4; p->state.due = e->now + 64;
+-    if (p->state.rx_bytes == 136) {
++    if (p->state.rx_bytes == p->state.reply_bytes) {
+         dbdma_complete(s->dma, 2); p->state.phase = DBDSP_RX_COMPLETE;
+         p->state.due = e->now + p->config.latency;
+     }
+diff --git a/hw/arm/db2010-dsp-peer.h b/hw/arm/db2010-dsp-peer.h
+index db167a8..4e6cbda 100644
+--- a/hw/arm/db2010-dsp-peer.h
++++ b/hw/arm/db2010-dsp-peer.h
+@@ -12,6 +12,7 @@
+ #include "db2010-audio-codec.h"
+ #include "db2010-audio-output.h"
+ #include "db2010-midi-stream.h"
++#include "db2010-fa-transfer.h"
+ const DB2010RegMap *dbdsp_map(void);
+ const DB2010RegMap *dbdsp_rx_map(void);
+ const char *db2010_peer_rx_access(void *opaque, DB2010Access *a);
+@@ -63,7 +64,8 @@ typedef struct DB2010DspPeerRuntime {
+     bool rx_ready;
+     uint32_t selector, rx_address, rx_count;
+     unsigned rx_bytes, replies;
+-    uint8_t response[136];
++    uint8_t response[256];
++    unsigned reply_bytes, reply_logical;
+     bool rx_inline;
+     uint32_t audio_opcode;
+     uint64_t audio_requests, audio_replies;
+@@ -89,8 +91,11 @@ typedef struct DB2010DspPeer {
+     bool omit_diagnostics;
+     QList *encoded_frames;
+     uint64_t encoded_frame_count;
++    QList *service_commands;
++    uint64_t service_command_count;
+     DB2010AudioSink sink;
+     DB2010AudioOutput *output;
++    DB2010FaTransfer *transfer;
+     DB2010DspPeerConfig config;
+     DB2010DspPeerRuntime state;
+ } DB2010DspPeer;
+diff --git a/hw/arm/db2010-simple.c b/hw/arm/db2010-simple.c
+index 89d37d7..b51fdd1 100644
+--- a/hw/arm/db2010-simple.c
++++ b/hw/arm/db2010-simple.c
+@@ -3,6 +3,7 @@
+ #include "qapi/error.h"
+ #include "qemu/error-report.h"
+ #include "db2010-components.h"
++#include "db2010-time.h"
+ #include "qobject/qdict.h"
+ #include "qobject/qlist.h"
+ 
+@@ -256,9 +257,10 @@ static const char *uart_tx(void *opaque, const DB2010DecodedAccess *d, DB2010Acc
+     }
+     return NULL;
+ }
+-/* Task126 controlled host-backed UART0. FIFO delivery and short-packet timeout
+- * are immediate batch assumptions; only real host bytes can create RX/autobaud.
+- * No AT reply, OS event or firmware state is supplied here. */
++/* Host-backed UART0. RX idle is a separate, latched interrupt after four
++ * character times on the configured 9600-baud cable model. Raising it with
++ * every socket batch races the driver's ACK and loses short packet endings.
++ * Only actual serial bytes create RX/autobaud; firmware owns the protocol. */
+ static uint16_t data_uart_status(const DB2010Uart *s)
+ {
+     return s->data_mask & (2 | (s->data_count ? 1 : 0) |
+@@ -268,6 +270,45 @@ static void data_uart_irq(DB2010Uart *s)
+ {
+     db2010_signal_set(&s->data_irq, data_uart_status(s) != 0);
+ }
++int64_t db2010_data_uart_deadline(DB2010Uart *s)
++{
++    if (!s->data_enabled) { return -1; }
++    int64_t due = s->data_idle_pending ? s->data_idle_due : -1;
++    if (s->data_wire_count && s->data_count < sizeof(s->data_rx)) {
++        due = due < 0 ? s->data_shift_due : MIN(due, s->data_shift_due);
++    }
++    return due;
++}
++void db2010_data_uart_advance(DB2010Uart *s, uint64_t now)
++{
++    /* Socket readiness is not a UART clock. Serialize 8N1 characters at
++     * the declared cable's 9600 baud, with bounded ingress and FIFO queues.
++     * Native RX interrupts and software flow control now get CPU time
++     * between characters, rather than draining an entire host file in an ISR. */
++    while (s->data_wire_count && s->data_count < sizeof(s->data_rx) &&
++           now >= s->data_shift_due) {
++        uint8_t byte = s->data_wire_rx[s->data_wire_head];
++        s->data_wire_head = (s->data_wire_head + 1) % sizeof(s->data_wire_rx);
++        s->data_wire_count--;
++        s->data_rx[(s->data_head + s->data_count++) % sizeof(s->data_rx)] = byte;
++        if (s->data_mode_known && (s->data_mode & 7) == 2) {
++            if (s->data_training == 1 && (byte == 'T' || byte == 't')) {
++                s->data_autobaud = true; s->data_autobauds++; s->data_training = 2;
++            } else if (s->data_training != 2) {
++                s->data_training = (byte == 'A' || byte == 'a') ? 1 : 0;
++            }
++        }
++        s->data_idle_pending = true;
++        s->data_idle_due = s->data_shift_due + UINT64_C(4166668);
++        s->data_shift_due += UINT64_C(1041667);
++        qemu_chr_fe_accept_input(&s->uart[0]);
++    }
++    if (s->data_idle_pending && now >= s->data_idle_due) {
++        s->data_idle_pending = false;
++        s->data_timeout = true;
++    }
++    data_uart_irq(s);
++}
+ /* Declared ideal cable pad plus the native UART's presence edges. The
+  * original ISR owns ACKs, driver state and OS notifications. */
+ void db2010_data_uart_cable(DB2010Uart *s, bool present)
+@@ -284,29 +325,24 @@ void db2010_data_uart_cable(DB2010Uart *s, bool present)
+ }
+ void db2010_data_uart_receive(DB2010Uart *s, const uint8_t *bytes, unsigned count)
+ {
+-    g_assert(s->data_enabled && count <= sizeof(s->data_rx) - s->data_count);
++    g_assert(s->data_enabled && count <= sizeof(s->data_wire_rx) - s->data_wire_count);
++    if (count && !s->data_wire_count) {
++        s->data_shift_due = db2010_virtual_ns() + UINT64_C(1041667);
++    }
+     for (unsigned i = 0; i < count; i++) {
+-        uint8_t byte = bytes[i];
+-        s->data_rx[(s->data_head + s->data_count++) % sizeof(s->data_rx)] = byte;
+-        if (s->data_mode_known && (s->data_mode & 7) == 2) {
+-            if (s->data_training == 1 && (byte == 'T' || byte == 't')) {
+-                s->data_autobaud = true;
+-                s->data_autobauds++;
+-                s->data_training = 2;
+-            } else if (s->data_training != 2) {
+-                s->data_training = (byte == 'A' || byte == 'a') ? 1 : 0;
+-            }
+-        }
++        s->data_wire_rx[(s->data_wire_head + s->data_wire_count++) % sizeof(s->data_wire_rx)] = bytes[i];
+     }
+     s->data_received += count;
+-    if (count) { s->data_timeout = true; }
++    if (count) {
++        if (s->data_reschedule) { s->data_reschedule(s->data_timing_opaque); }
++    }
+     data_uart_irq(s);
+ }
+ static int data_uart_can_receive(void *opaque)
+ {
+     DB2010Uart *s = opaque;
+     return s->data_present && s->data_mode_known && (s->data_mode & 7) != 7 ?
+-        sizeof(s->data_rx) - s->data_count : 0;
++        sizeof(s->data_wire_rx) - s->data_wire_count : 0;
+ }
+ static void data_uart_receive(void *opaque, const uint8_t *bytes, int count)
+ {
+@@ -504,6 +540,10 @@ void db2010_uart_reset(DB2010Uart *s)
+     s->data_presence_events = 0; s->data_cable_transitions = 0;
+     s->data_mode = s->data_mask = s->data_head = s->data_count = s->data_training = 0;
+     s->data_rx_bytes = s->data_received = s->data_autobauds = 0;
++    s->data_idle_pending = false;
++    s->data_idle_due = 0;
++    s->data_wire_head = s->data_wire_count = 0; s->data_shift_due = 0;
++    memset(s->data_wire_rx, 0, sizeof(s->data_wire_rx));
+     memset(s->data_rx, 0, sizeof(s->data_rx));
+     db2010_signal_set(&s->data_irq, false);
+ }
+@@ -538,6 +578,9 @@ void db2010_uart_export(DB2010Uart *model, QDict *snapshot)
+             qdict_put_int(data, "rx_count", model->data_count);
+             qdict_put_int(data, "received", model->data_received);
+             qdict_put_int(data, "rx_bytes", model->data_rx_bytes);
++            qdict_put_bool(data, "idle_pending", model->data_idle_pending);
++            qdict_put_int(data, "idle_due", db2010_data_uart_deadline(model));
++            qdict_put_int(data, "wire_queued", model->data_wire_count);
+             qdict_put_int(data, "autobauds", model->data_autobauds);
+             qdict_put_bool(data, "timeout", model->data_timeout);
+             qdict_put_bool(data, "autobaud", model->data_autobaud);
+diff --git a/hw/arm/db2010-time.c b/hw/arm/db2010-time.c
+index f9bb57e..e748940 100644
+--- a/hw/arm/db2010-time.c
++++ b/hw/arm/db2010-time.c
+@@ -128,6 +128,21 @@ static void sim_service(void *opaque)
+     DB2010MachineState *s=opaque;
+     if (!s->stop) { dbsim_advance(s->simif,db2010_virtual_ns()); }
+ }
++static int64_t serial_due(void *opaque)
++{
++    DB2010MachineState *s = opaque;
++    return s->stop ? -1 : db2010_data_uart_deadline(s->uart_port);
++}
++static void serial_service(void *opaque)
++{
++    DB2010MachineState *s = opaque;
++    if (!s->stop) { db2010_data_uart_advance(s->uart_port, db2010_virtual_ns()); }
++}
++static void serial_reschedule(void *opaque)
++{
++    DB2010MachineState *s = opaque;
++    db2010_device_reschedule(s->devices[DBDEV_UART]);
++}
+ void db2010_time_connect(DB2010MachineState *s)
+ {
+ #define TIMED(id, name) db2010_device_timing(s->devices[id], name##_due, name##_service, s)
+@@ -135,6 +150,9 @@ void db2010_time_connect(DB2010MachineState *s)
+     TIMED(DBDEV_I2C, i2c); TIMED(DBDEV_F500_CONTROL, control);
+     TIMED(DBDEV_F500_PRIMARY, primary); TIMED(DBDEV_F500_AUXILIARY, auxiliary);
+     TIMED(DBDEV_SIMIF, sim);
++    TIMED(DBDEV_UART, serial);
++    s->uart_port->data_reschedule = serial_reschedule;
++    s->uart_port->data_timing_opaque = s;
+     TIMED(DBDEV_FA_TRANSFER, fa); TIMED(DBDEV_DSP, dsp);
+ #undef TIMED
+     db2010_device_dependency(s->devices[DBDEV_DMA], s->devices[DBDEV_DISPLAY]);

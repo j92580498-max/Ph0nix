@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["native/k750", "native/db2010-host", "native/desktop", "frontends/android/native"]
+default-members = ["native/desktop"]
+exclude = ["dependencies/samsung"]
+
+[profile.dev]
+opt-level = 1
+debug = 0
+incremental = false
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "debuginfo"
+

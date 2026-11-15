@@ -1,0 +1,17 @@
+/build/
+/dist/
+/artifacts/
+*.egg-info/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.venv/
+/frontends/android/.gradle/
+/frontends/android/build/
+/frontends/android/app/build/
+/frontends/android/local.properties
+/firmware/
+/fw/k750i/
+/target/
+*.keystore
+*.jks

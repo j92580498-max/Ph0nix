@@ -1,0 +1,110 @@
+{
+  "run": "artifacts/k750-startup-ui-v3",
+  "engine_source_commit": "7b0a047ea6b9dd7a6088625de3227d532c9d34ed",
+  "engine_binary_sha256": "d0a8350ed3b32f19016cb4015de1e1cfd241c7bfaa73643f4001719b4abd3912",
+  "source_result_sha256": "1fefe042504a9158cadaa12ced82cb6a43e892b41fa1479a4c4bfb29bca0da6b",
+  "integrity": {
+    "sealed_artifacts": 22,
+    "result": "passed"
+  },
+  "stop": {
+    "observations": 320000000,
+    "size": 2,
+    "virtual_ns": 46786169485,
+    "pc": 198,
+    "reason": "instruction_limit",
+    "address": 198
+  },
+  "frame": {
+    "update": "frame-0007.update.rgb565",
+    "update_bytes": 4224,
+    "update_sha256": "eeb3f24a042a04eeba2d4c426a0ef76f2dd9c4a4eec04f5409c6954289092edb",
+    "cursor_start": 43008,
+    "cursor_end": 46080,
+    "panel_known_pixels": 38720,
+    "frame": 7,
+    "source": 1275830900,
+    "started": 311927064,
+    "completed": 311927327,
+    "bytes": 77440,
+    "width": 176,
+    "height": 220,
+    "interpretation": "big-endian RGB565 panel preview; native format0x110 swaps RGB565 bytes; physical wiring unmeasured",
+    "all_zero": false,
+    "raw": "frame-0007.rgb565",
+    "png": "frame-0007.png",
+    "raw_sha256": "37e53a6a238bf3667a28f6d5892bc452008c2950ffc71fda495e9a71136a58c9",
+    "png_sha256": "3b38f936e7fad81200b9f773a887809bc993c9509d65144a870e2311bc07137f"
+  },
+  "known_pixels": 38720,
+  "nonblack_pixels": 38396,
+  "colors": 9,
+  "frame_sha256": "37e53a6a238bf3667a28f6d5892bc452008c2950ffc71fda495e9a71136a58c9",
+  "png_sha256": "3b38f936e7fad81200b9f773a887809bc993c9509d65144a870e2311bc07137f",
+  "browser_pixels_match": true,
+  "lcd_updates": 8,
+  "fm_radio": {
+    "completed_frames": 1,
+    "active": false,
+    "declared_frames": 1,
+    "latest_frame_hex": "0080000bd20a0040100000",
+    "profile": "i2c-frame-sink",
+    "pending_frame_hex": "",
+    "wire_write_address": 32,
+    "completed_bytes": 11
+  },
+  "firmware_inputs": {
+    "fs_tail": {
+      "address": 1172308996,
+      "end": 1173356544,
+      "fill": 255,
+      "footer_hex": "5412",
+      "footer_addresses": [
+        1172570110,
+        1172832254,
+        1173094398,
+        1173356542
+      ],
+      "sha256": "9d4f58e200224ad91efbaa6c82a536a9f6fcb1a5ef5379faf2383c9a5ebbfd54",
+      "synthetic": true
+    },
+    "gdfs_backup": {
+      "profile": "logical-gdfs-v0-active-banks",
+      "source_bytes": 53827,
+      "source_sha256": "e74786bc68180c2aa1efff127f2fd2a3e27925fc6397fbc2ca933ac8ee65c5b1",
+      "raw_bytes": 1048576,
+      "raw_sha256": "c863984315ebe22819fa7e546e73b204c2f9b4fcb5f4775f13aa0db46b978a00",
+      "address": 1173356544,
+      "unit_count": 955,
+      "bank_unit_counts": [
+        231,
+        422,
+        260,
+        12,
+        12,
+        12,
+        6
+      ],
+      "bank_payload_bytes": [
+        7618,
+        11037,
+        7696,
+        13475,
+        1582,
+        2262,
+        3468
+      ],
+      "payloads_preserved": true,
+      "physical_dump": false
+    },
+    "nand": {
+      "main_bytes": 33554432,
+      "spare_bytes": 1048576,
+      "fill": 255,
+      "physical_dump": false,
+      "main_sha256": "60f2ef0f4cf4249f713191d827fa964e07bd29a692838ca50707b7292e28494c",
+      "spare_sha256": "f5fb04aa5b882706b9309e885f19477261336ef76a150c3b4d3489dfac3953ec"
+    }
+  },
+  "scope": "Original firmware startup logo followed by native Please wait UI and progress-bar updates, with declared hardware/storage compatibility inputs; complete UI boot unestablished."
+}

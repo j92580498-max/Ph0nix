@@ -1,0 +1,211 @@
+diff --git a/hw/arm/db2010-config.c b/hw/arm/db2010-config.c
+--- a/hw/arm/db2010-config.c
++++ b/hw/arm/db2010-config.c
+@@ -1,5 +1,7 @@
+ #include "qemu/osdep.h"
+ #include "db2010-internal.h"
++#include "exec/icount.h"
++#include "system/cpu-timers.h"
+ 
+ uint64_t input_uint(QDict *dict, const char *key, uint64_t max)
+ {
+@@ -295,12 +297,17 @@
+     s->cpsr = input_uint(state, "cpsr", UINT32_MAX);
+     s->sctlr = input_uint(state, "sctlr", UINT32_MAX);
+     QDict *timebase = qobject_to(QDict, qdict_get(state, "timebase"));
+-    if (!timebase || qdict_size(timebase) != 2 ||
+-        g_strcmp0(qdict_get_try_str(timebase, "profile"), "qemu-virtual-v1") ||
+-        input_uint(timebase, "icount_shift", 10) != 6) {
+-        error_report("db2010: requires qemu-virtual-v1 / icount shift6; archived instruction clocks require their frozen runner and QEMU source bundle");
++    bool realtime = timebase && qdict_size(timebase) == 1 &&
++        !g_strcmp0(qdict_get_try_str(timebase, "profile"), "qemu-realtime-v1");
++    bool fixed = timebase && qdict_size(timebase) == 2 &&
++        !g_strcmp0(qdict_get_try_str(timebase, "profile"), "qemu-virtual-v1") &&
++        input_uint(timebase, "icount_shift", 10) == 6 &&
++        icount_enabled() == ICOUNT_PRECISE && icount_to_ns(1) == 64;
++    if ((!fixed && !realtime) || (realtime && (s->research_guards || icount_enabled()))) {
++        error_report("db2010: requires qemu-virtual-v1 / icount shift6, or unguarded qemu-realtime-v1 without icount; archived instruction clocks require their frozen runner and QEMU source bundle");
+         exit(EXIT_FAILURE);
+     }
++    if (realtime) { cpu_timers_prepare_legacy_icount_restore(6); }
+     s->instruction_limited = qdict_haskey(state, "instruction_limit");
+     s->limit = s->instruction_limited ? input_uint(state, "instruction_limit", UINT64_MAX) : 0;
+     if (s->instruction_limited && !s->research_guards) {
+diff --git a/hw/arm/db2010-cpu.c b/hw/arm/db2010-cpu.c
+--- a/hw/arm/db2010-cpu.c
++++ b/hw/arm/db2010-cpu.c
+@@ -7,7 +7,12 @@
+ void db2010_runtime_observe(DB2010MachineState *s)
+ {
+     if (!s->research_guards) {
+-        s->count = icount_get_raw() - s->native_count_base;
++        /* Native apps use the ordinary virtual clock so the ARM/Jazelle
++         * software fallback can execute at host speed. Nanosecond tags keep
++         * internal start/completion markers nonzero; they are not presented
++         * as an instruction count. Research icount observations are intact. */
++        s->count = icount_enabled() ? icount_get_raw() - s->native_count_base :
++                                    db2010_virtual_ns();
+         s->instruction_pc = s->cpu->env.regs[15];
+     }
+ }
+@@ -28,6 +33,7 @@
+ void db2010_cpu_instruction(void *opaque, CPUARMState *env,
+                             unsigned size, uint32_t insn)
+ {
++    BQL_LOCK_GUARD();
+     DB2010MachineState *s = opaque;
+     uint32_t pc = env->regs[15];
+     db2010_runtime_observe(s);
+@@ -46,6 +52,11 @@
+ void db2010_cpu_io(void *opaque, CPUARMState *env, uint32_t address,
+                     unsigned size, bool write, uint64_t value, uintptr_t retaddr)
+ {
++    /* TCG invokes architectural preflight before MMIO takes the BQL. Native
++     * virtual timers run on the I/O thread, so the timestamp and device
++     * preview must be protected together, just like the committed access.
++     * QEMU's CPU longjmp cleanup also releases this lock on a guard stop. */
++    BQL_LOCK_GUARD();
+     DB2010MachineState *s = opaque;
+     env->research_retaddr = retaddr;
+     if (!retaddr) { CPU(s->cpu)->neg.can_do_io = true; }
+diff --git a/hw/arm/db2010-reset.c b/hw/arm/db2010-reset.c
+--- a/hw/arm/db2010-reset.c
++++ b/hw/arm/db2010-reset.c
+@@ -44,7 +44,7 @@
+     env->cp15.sctlr_el[1] = s->sctlr;
+     arm_rebuild_hflags(env);
+     s->count = 0;
+-    s->native_count_base = s->research_guards ? 0 : icount_get_raw();
++    s->native_count_base = s->research_guards || !icount_enabled() ? 0 : icount_get_raw();
+     qobject_unref(s->stop);
+     s->stop = NULL;
+ }
+diff --git a/hw/arm/db2010-observe.c b/hw/arm/db2010-observe.c
+--- a/hw/arm/db2010-observe.c
++++ b/hw/arm/db2010-observe.c
+@@ -1,6 +1,7 @@
+ #include "qemu/osdep.h"
+ #include "hw/core/clock.h"
+ #include "qemu/timer.h"
++#include "exec/icount.h"
+ #include "db2010-internal.h"
+ 
+ void collect_progress(CPUState *cpu, run_on_cpu_data data)
+@@ -39,12 +40,14 @@
+         run_on_cpu(CPU(s->cpu), collect_progress, RUN_ON_CPU_HOST_PTR(&p));
+     }
+     qdict_put_bool(progress, "research_guards", s->research_guards);
+-    qdict_put_str(progress, "counter_kind", s->research_guards ? "research-observations" : "qemu-icount");
+-    qdict_put_int(progress, "observations", p.observations);
++    qdict_put_str(progress, "counter_kind", s->research_guards ? "research-observations" :
++        icount_enabled() ? "qemu-icount" : "qemu-virtual-time");
++    if (s->research_guards || icount_enabled()) { qdict_put_int(progress, "observations", p.observations); }
++    else { qdict_put_null(progress, "observations"); }
+     qdict_put_int(progress, "virtual_ns", p.virtual_ns);
+     if (p.cpu_hz) { qdict_put_int(progress, "cpu_hz", p.cpu_hz); }
+     else { qdict_put_null(progress, "cpu_hz"); }
+-    qdict_put_str(progress, "timing_profile", "qemu-virtual-v1");
++    qdict_put_str(progress, "timing_profile", icount_enabled() ? "qemu-virtual-v1" : "qemu-realtime-v1");
+     qdict_put_int(progress, "pc", p.pc);
+     qdict_put_bool(progress, "running", runstate_is_running());
+     qdict_put_int(progress,"wfi_waits",p.wfi_waits);
+@@ -118,14 +121,17 @@
+     qdict_put_int(snapshot, "sctlr", s->cpu->env.cp15.sctlr_el[1]);
+     db2010_runtime_observe(s);
+     qdict_put_bool(snapshot, "research_guards", s->research_guards);
+-    qdict_put_str(snapshot, "counter_kind", s->research_guards ? "research-observations" : "qemu-icount");
+-    qdict_put_int(snapshot, "observations", s->count);
++    qdict_put_str(snapshot, "counter_kind", s->research_guards ? "research-observations" :
++        icount_enabled() ? "qemu-icount" : "qemu-virtual-time");
++    if (s->research_guards || icount_enabled()) { qdict_put_int(snapshot, "observations", s->count); }
++    else { qdict_put_null(snapshot, "observations"); }
+     qdict_put_int(snapshot, "virtual_ns", db2010_virtual_ns());
+     if (s->syscon->cpu_hz) { qdict_put_int(snapshot, "cpu_hz", s->syscon->cpu_hz); }
+     else { qdict_put_null(snapshot, "cpu_hz"); }
+     dbsys_export(s->syscon, snapshot);
+-    qdict_put_str(snapshot, "timing_profile", "qemu-virtual-v1");
+-    qdict_put_int(snapshot, "icount_shift", 6);
++    qdict_put_str(snapshot, "timing_profile", icount_enabled() ? "qemu-virtual-v1" : "qemu-realtime-v1");
++    if (icount_enabled()) { qdict_put_int(snapshot, "icount_shift", 6); }
++    else { qdict_put_null(snapshot, "icount_shift"); }
+     qdict_put_int(snapshot, "timer1_hz", clock_get_hz(s->timer->clock));
+     qdict_put_int(snapshot, "rtc_hz", clock_get_hz(s->rtc->clock));
+     if (s->has_f500_port) { qdict_put(snapshot, "f500_command_port", dbfp_snapshot(s->f500_port)); }
+diff --git a/system/cpu-timers.c b/system/cpu-timers.c
+--- a/system/cpu-timers.c
++++ b/system/cpu-timers.c
+@@ -157,6 +157,52 @@
+     return icount_enabled() == ICOUNT_ADAPTATIVE;
+ }
+ 
++static bool legacy_icount_restore;
++
++static void legacy_icount_timer(void *opaque)
++{
++    /* Compatibility storage only; restored icount timers are cancelled. */
++}
++
++void cpu_timers_prepare_legacy_icount_restore(unsigned shift)
++{
++    assert(!icount_enabled() && shift <= 10);
++    legacy_icount_restore = true;
++    timers_state.icount_time_shift = shift;
++    /* Old saves can contain these timer pointers even though the new engine
++     * has instruction counting disabled. Allocate their migration storage
++     * before loading; a NULL VMSTATE_TIMER_PTR cannot accept that subsection. */
++    timers_state.icount_warp_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL_RT,
++                                                 legacy_icount_timer, NULL);
++    timers_state.icount_rt_timer = timer_new_ms(QEMU_CLOCK_VIRTUAL_RT,
++                                               legacy_icount_timer, NULL);
++    timers_state.icount_vm_timer = timer_new_ns(QEMU_CLOCK_VIRTUAL,
++                                               legacy_icount_timer, NULL);
++}
++
++static int legacy_icount_post_load(void *opaque, int version_id)
++{
++    TimersState *s = opaque;
++    if (!legacy_icount_restore || icount_enabled()) { return 0; }
++    if (s->icount_time_shift < 0 || s->icount_time_shift > 10 || s->qemu_icount < 0) {
++        return -EINVAL;
++    }
++    __int128 virtual_ns = (__int128)s->qemu_icount_bias +
++                          ((__int128)s->qemu_icount << s->icount_time_shift);
++    if (virtual_ns < 0 || virtual_ns > INT64_MAX) { return -EINVAL; }
++    /* Preserve the saved guest timestamp before any board clock phase is
++     * restored. CPU execution now advances the normal paused/resumed clock;
++     * changing the rate must never move guest time backwards. */
++    seqlock_write_lock(&s->vm_clock_seqlock, &s->vm_clock_lock);
++    qatomic_set(&s->cpu_clock_offset, (int64_t)virtual_ns);
++    seqlock_write_unlock(&s->vm_clock_seqlock, &s->vm_clock_lock);
++    timer_del(s->icount_warp_timer);
++    timer_del(s->icount_rt_timer);
++    timer_del(s->icount_vm_timer);
++    s->vm_clock_warp_start = -1;
++    return 0;
++}
++
+ /*
+  * Subsection for warp timer migration is optional, because may not be created
+  */
+@@ -204,6 +250,7 @@
+     .version_id = 1,
+     .minimum_version_id = 1,
+     .needed = icount_state_needed,
++    .post_load = legacy_icount_post_load,
+     .fields = (const VMStateField[]) {
+         VMSTATE_INT64(qemu_icount_bias, TimersState),
+         VMSTATE_INT64(qemu_icount, TimersState),
+diff --git a/include/system/cpu-timers.h b/include/system/cpu-timers.h
+--- a/include/system/cpu-timers.h
++++ b/include/system/cpu-timers.h
+@@ -36,6 +36,10 @@
+  */
+ int64_t cpu_get_clock(void);
+ 
++/* Opt in before incoming migration when a board moves its native frontend
++ * from a known fixed icount clock to the ordinary host-paced virtual clock. */
++void cpu_timers_prepare_legacy_icount_restore(unsigned shift);
++
+ void qemu_timer_notify_cb(void *opaque, QEMUClockType type);
+ 
+ /* get/set VIRTUAL clock and VM elapsed ticks via the cpus accel interface */

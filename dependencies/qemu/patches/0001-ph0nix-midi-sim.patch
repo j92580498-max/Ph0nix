@@ -1,0 +1,453 @@
+diff --git a/hw/arm/db2010-checkpoint-fields.inc b/hw/arm/db2010-checkpoint-fields.inc
+index 87fc547..9dc1d2d 100644
+--- a/hw/arm/db2010-checkpoint-fields.inc
++++ b/hw/arm/db2010-checkpoint-fields.inc
+@@ -335,9 +335,26 @@ static void cp_DB2010DspPeerRuntime(Checkpoint *c, DB2010DspPeerRuntime *v)
+             CP_U8(m->synth.program[i]); CP_U8(m->synth.volume[i]);
+             if (c->version >= 26) { CP_U16(m->synth.bank[i]); }
+             CP_U16(m->synth.bend[i]);
++            if (c->version >= 27) {
++                CP_U8(m->synth.expression[i]); CP_U8(m->synth.pan[i]);
++                CP_U8(m->synth.modulation[i]);
++            } else if (c->load) {
++                m->synth.expression[i] = 127; m->synth.pan[i] = 64;
++                m->synth.modulation[i] = 0;
++            }
+             if (m->synth.program[i] > 127 || m->synth.volume[i] > 127 ||
++                m->synth.expression[i] > 127 || m->synth.pan[i] > 127 ||
++                m->synth.modulation[i] > 127 ||
+                 m->synth.bank[i] > 16383 || m->synth.bend[i] > 16383) { c->invalid = true; }
+         }
++        if (c->version >= 27) {
++            CP_U32(m->synth.lfo_phase); CP_U16(m->synth.enabled_channels);
++            CP_U8(m->synth.gm_mode);
++            if (m->synth.gm_mode > 2) { c->invalid = true; }
++        } else if (c->load) {
++            m->synth.lfo_phase = 0; m->synth.enabled_channels = UINT16_MAX;
++            m->synth.gm_mode = 1;
++        }
+         CP_U64(m->synth.notes); CP_U64(m->synth.stolen);
+         DB2010AudioSamples *ms = &m->samples;
+         for (unsigned i = 0; i < ARRAY_SIZE(ms->pcm); i++) { CP_U16(ms->pcm[i]); }
+@@ -523,7 +540,8 @@ static void cp_DB2010NorPart(Checkpoint *c, DB2010NorPart *v)
+ 
+ static void cp_DB2010SimCard(Checkpoint *c, DB2010SimCard *v)
+ {
+-    for (unsigned i0 = 0; i0 < DBSIM_FILES; i0++) {
++    unsigned files = c->version >= 28 ? DBSIM_FILES : DBSIM_LEGACY_FILES;
++    for (unsigned i0 = 0; i0 < files; i0++) {
+         cp_DB2010SimFile(c, &v->files[i0]);
+     }
+     CP_U16(v->df);
+diff --git a/hw/arm/db2010-checkpoint.c b/hw/arm/db2010-checkpoint.c
+index e75e695..1974015 100644
+--- a/hw/arm/db2010-checkpoint.c
++++ b/hw/arm/db2010-checkpoint.c
+@@ -12,7 +12,7 @@
+ #include "qemu/timer.h"
+ #include "system/runstate.h"
+ 
+-#define CHECKPOINT_VERSION 26
++#define CHECKPOINT_VERSION 28
+ 
+ typedef struct Checkpoint {
+     QEMUFile *file;
+diff --git a/hw/arm/db2010-config.c b/hw/arm/db2010-config.c
+index 67fdb94..23403bd 100644
+--- a/hw/arm/db2010-config.c
++++ b/hw/arm/db2010-config.c
+@@ -950,12 +950,18 @@ void load_state(DB2010MachineState *s)
+     }
+     if (qdict_haskey(state, "simif")) {
+         QDict *sim=qobject_to(QDict,qdict_get(state,"simif"));
+-        if (!sim || qdict_size(sim)!=2+qdict_haskey(sim,"setup_initial_value") ||
++        if (!sim || qdict_size(sim)!=2+qdict_haskey(sim,"setup_initial_value")+qdict_haskey(sim,"card_profile") ||
+             g_strcmp0(qdict_get_try_str(sim,"profile"),"pmb7850-gsm-stub-native-simif")) {
+             error_report("db2010: unsupported SIMIF profile"); exit(EXIT_FAILURE);
+         }
+         s->simif->byte_ns=input_uint(sim,"byte_ns",1000000000);
+         if (!s->simif->byte_ns) { error_report("db2010: SIMIF byte latency required"); exit(EXIT_FAILURE); }
++        if (qdict_haskey(sim,"card_profile")) {
++            if (g_strcmp0(qdict_get_try_str(sim,"card_profile"),"ph0nix-test-sim")) {
++                error_report("db2010: unsupported SIM card profile"); exit(EXIT_FAILURE);
++            }
++            s->simif->ph0nix_card=true;
++        }
+         if (qdict_haskey(sim,"setup_initial_value")) {
+             unsigned value=input_uint(sim,"setup_initial_value",255);
+             if (value!=0 && value!=0x40 && value!=0xc0) {
+diff --git a/hw/arm/db2010-dsp-peer.c b/hw/arm/db2010-dsp-peer.c
+index 496cd14..4aa78c5 100644
+--- a/hw/arm/db2010-dsp-peer.c
++++ b/hw/arm/db2010-dsp-peer.c
+@@ -98,11 +98,26 @@ QDict *dbdsp_snapshot(DB2010DspPeer *p)
+     qdict_put_int(r, "midi_replies", p->state.midi_replies);
+     if (p->config.midi_setup) {
+         DB2010MidiStream *m = &p->state.midi;
+-        QList *banks = qlist_new();
+-        for (unsigned i = 0; i < 16; i++) { qlist_append_int(banks, m->synth.bank[i]); }
++        QList *banks = qlist_new(), *expression = qlist_new(), *pan = qlist_new(), *modulation = qlist_new();
++        for (unsigned i = 0; i < 16; i++) {
++            qlist_append_int(banks, m->synth.bank[i]);
++            qlist_append_int(expression, m->synth.expression[i]);
++            qlist_append_int(pan, m->synth.pan[i]);
++            qlist_append_int(modulation, m->synth.modulation[i]);
++        }
+         qdict_put(r, "midi_banks", banks);
++        qdict_put(r, "midi_expression", expression); qdict_put(r, "midi_pan", pan);
++        qdict_put(r, "midi_modulation", modulation);
++        qdict_put_int(r, "midi_enabled_channels", m->synth.enabled_channels);
++        qdict_put_int(r, "midi_gm_mode", m->synth.gm_mode);
+         qdict_put_str(r, "midi_bank_policy", "all-banks-use-host-triangle");
+         qdict_put_int(r, "midi_buffered_words", m->used);
++        GString *pending = g_string_new(NULL);
++        for (unsigned i = 0; i < MIN(m->used, 64); i++) {
++            g_string_append_printf(pending, "%02x%02x", m->ring[i] & 255, m->ring[i] >> 8);
++        }
++        qdict_put_str(r, "midi_pending_record_hex", pending->str);
++        g_string_free(pending, true);
+         qdict_put_int(r, "midi_events", m->events);
+         qdict_put_int(r, "midi_frames", m->frames);
+         qdict_put_int(r, "midi_nonzero_samples", m->nonzero_samples);
+@@ -115,7 +130,7 @@ QDict *dbdsp_snapshot(DB2010DspPeer *p)
+         qdict_put_bool(r, "midi_eof", m->eof);
+         qdict_put_bool(r, "midi_completed", m->completed);
+         qdict_put_bool(r, "midi_completion_sent", m->completion_sent);
+-        qdict_put_str(r, "midi_processing", "host-40-triangle-48000-mono-duplicated");
++        qdict_put_str(r, "midi_processing", "host-40-triangle-48000-stereo-pan");
+         char hash[17]; snprintf(hash, sizeof(hash), "%016" PRIx64, m->pcm_hash);
+         qdict_put_str(r, "midi_pcm_fnv1a64", hash);
+     }
+diff --git a/hw/arm/db2010-midi-stream.c b/hw/arm/db2010-midi-stream.c
+index 75ecfa7..5d7ede2 100644
+--- a/hw/arm/db2010-midi-stream.c
++++ b/hw/arm/db2010-midi-stream.c
+@@ -89,14 +89,22 @@ const char *db2010_midi_stream_advance(DB2010MidiStream *m, DB2010AudioSink *sin
+             uint16_t *b = m->ring;
+             uint64_t time = b[3] | (uint32_t)b[4] << 16;
+             bool end = !(b[0] | b[1] | b[2] | b[3] | b[4]);
++            unsigned words = 5;
++            bool extended = !b[0] && !end;
++            if (extended) {
++                if (b[2] > 32) { return "dsp_peer_midi_long_event_unmodeled"; }
++                words += b[2];
++                if (m->used < words) { return "dsp_peer_midi_partial_record_unmodeled"; }
++            }
+             if (m->eof && !end) { return "dsp_peer_midi_data_after_end_unmodeled"; }
+             if (end || time <= m->frames) {
+                 if (!end && time < m->last_time) { return "dsp_peer_midi_time_order_unmodeled"; }
+-                if (!b[0] && !end) { return "dsp_peer_midi_long_event_unmodeled"; }
+-                const char *fault = end ? NULL : db2010_midi_event(&m->synth, b[0], b[1], b[2]);
++                const char *fault = end ? NULL : extended ?
++                    db2010_midi_long_event(&m->synth, b[1], b + 5, b[2]) :
++                    db2010_midi_event(&m->synth, b[0], b[1], b[2]);
+                 if (fault) { return fault; }
+                 if (end) {
+-                    /* Original4488468C flushes the zero sentinel on every
++                    /* The native parser flushes the zero sentinel on every
+                      * pending refill after the parser reaches EOT. Native
+                      * gameplay exposes duplicate sentinels behind the first.
+                      * They return ownership once, without restarting tails. */
+@@ -114,10 +122,10 @@ const char *db2010_midi_stream_advance(DB2010MidiStream *m, DB2010AudioSink *sin
+                     }
+                 } else { m->last_time = time; m->events++; }
+                 unsigned before = m->used;
+-                m->used -= 5; m->credit += 5;
++                m->used -= words; m->credit += words;
+                 m->credit_notify |= before > 750 && m->used <= 750;
+-                memmove(b, b + 5, m->used * sizeof(*b));
+-                memset(b + m->used, 0, 5 * sizeof(*b));
++                memmove(b, b + words, m->used * sizeof(*b));
++                memset(b + m->used, 0, words * sizeof(*b));
+                 continue;
+             }
+             until = MIN(until, time);
+diff --git a/hw/arm/db2010-midi-synth.c b/hw/arm/db2010-midi-synth.c
+index 0ca5e67..72e5030 100644
+--- a/hw/arm/db2010-midi-synth.c
++++ b/hw/arm/db2010-midi-synth.c
+@@ -5,6 +5,7 @@
+  * SPDX-License-Identifier: GPL-2.0-or-later */
+ #include "qemu/osdep.h"
+ #include "db2010-midi-synth.h"
++#include <string.h>
+ 
+ /* round(440 * 2^((note - 69)/12) * 2^32 / 48000), A4 = 440 Hz. */
+ static const uint32_t increments[128] = {
+@@ -67,7 +68,11 @@ static const uint32_t bend_ratios[257] = {
+ void db2010_midi_synth_init(DB2010MidiSynth *s)
+ {
+     *s = (DB2010MidiSynth){0};
+-    for (unsigned i = 0; i < 16; i++) { s->volume[i] = 127; s->bend[i] = 8192; }
++    s->enabled_channels = UINT16_MAX; s->gm_mode = 1;
++    for (unsigned i = 0; i < 16; i++) {
++        s->volume[i] = s->expression[i] = 127;
++        s->pan[i] = 64; s->bend[i] = 8192;
++    }
+ }
+ 
+ static uint32_t pitch(DB2010MidiSynth *s, unsigned channel, unsigned note)
+@@ -96,6 +101,22 @@ const char *db2010_midi_event(DB2010MidiSynth *s, unsigned status,
+         return NULL;
+     }
+     if (kind == 11 && data1 == 7) { s->volume[channel] = data2; return NULL; }
++    if (kind == 11 && data1 == 11) { s->expression[channel] = data2; return NULL; }
++    if (kind == 11 && data1 == 10) { s->pan[channel] = data2; return NULL; }
++    if (kind == 11 && data1 == 1) { s->modulation[channel] = data2; return NULL; }
++    if (kind == 11 && (data1 == 120 || data1 == 123)) {
++        for (unsigned i = 0; i < DB2010_MIDI_VOICES; i++) {
++            DB2010MidiVoice *v = &s->voices[i];
++            if (!v->velocity || v->channel != channel) { continue; }
++            if (data1 == 120) { v->velocity = 0; }
++            else if (v->held) { v->held = false; v->release = DB2010_MIDI_RELEASE; }
++        }
++        return NULL;
++    }
++    if (kind == 11 && data1 == 121) {
++        s->expression[channel] = 127; s->modulation[channel] = 0;
++        status = 0xe0 | channel; kind = 14; data1 = 0; data2 = 64;
++    }
+     if (kind == 14) {
+         s->bend[channel] = data1 | (data2 << 7);
+         for (unsigned i = 0; i < DB2010_MIDI_VOICES; i++) {
+@@ -115,6 +136,7 @@ const char *db2010_midi_event(DB2010MidiSynth *s, unsigned status,
+         if (oldest) { oldest->held = false; oldest->release = DB2010_MIDI_RELEASE; }
+         return NULL;
+     }
++    if (!(s->enabled_channels & (1u << channel))) { return NULL; }
+     DB2010MidiVoice *slot = NULL;
+     for (unsigned i = 0; i < DB2010_MIDI_VOICES; i++) {
+         DB2010MidiVoice *v = &s->voices[i];
+@@ -128,12 +150,66 @@ const char *db2010_midi_event(DB2010MidiSynth *s, unsigned status,
+     return NULL;
+ }
+ 
+-void db2010_midi_render(DB2010MidiSynth *s, int16_t *pcm, unsigned frames)
++const char *db2010_midi_long_event(DB2010MidiSynth *s, unsigned type,
++                                  const uint16_t *data, unsigned count)
+ {
+-    for (unsigned f = 0; f < frames; f++) {
+-        int32_t sum = 0;
++    if (type == 1 && count && count <= 32 && !(count & 1)) {
++        /* Original44895F4C emits a five-halfword header, then the channel
++         * list followed by its cumulative MIP values. Original44897940
++         * deinterleaves F0 7F 7F 0B 01 [channel MIP ...] F7. This is the
++         * standard SP-MIDI allocation message, not a note or tempo event.
++         * Keep listed channels that fit this declared 40-voice renderer. */
++        unsigned pairs = count / 2, seen = 0, enabled = 0, previous = 0;
++        for (unsigned i = 0; i < pairs; i++) {
++            unsigned channel = data[i], mip = data[i + pairs];
++            if (channel > 15 || mip > 127 || mip < previous ||
++                (seen & (1u << channel))) {
++                return "dsp_peer_midi_mip_event_unmodeled";
++            }
++            seen |= 1u << channel; previous = mip;
++            if (mip <= DB2010_MIDI_VOICES) { enabled |= 1u << channel; }
++        }
++        s->enabled_channels = enabled;
+         for (unsigned i = 0; i < DB2010_MIDI_VOICES; i++) {
+             DB2010MidiVoice *v = &s->voices[i];
++            if (!(enabled & (1u << v->channel))) { v->velocity = 0; }
++        }
++        return NULL;
++    }
++    if (!count && type >= 2 && type <= 4) {
++        /* The native parser maps GM1 On, GM2 On and GM Off to 2, 3, 4.
++         * Both GM banks use this same disclosed triangle substitute. */
++        if (type != 4) {
++            uint64_t notes = s->notes, stolen = s->stolen;
++            db2010_midi_synth_init(s);
++            s->notes = notes; s->stolen = stolen;
++        }
++        s->gm_mode = type == 4 ? 0 : type - 1;
++        return NULL;
++    }
++    return "dsp_peer_midi_long_event_unmodeled";
++}
++
++void db2010_midi_render(DB2010MidiSynth *s, int16_t *pcm, unsigned frames)
++{
++    /* Walking only active voices removes the 40-voice scan from silent and
++     * lightly populated game audio. Voice ownership and integer PCM are
++     * independent of packet size. The declared modulation substitute is a
++     * 5 Hz triangle LFO with +/-1/32 frequency depth at CC1=127. */
++    DB2010MidiVoice *active[DB2010_MIDI_VOICES];
++    unsigned count = 0;
++    for (unsigned i = 0; i < DB2010_MIDI_VOICES; i++) {
++        if (s->voices[i].velocity) { active[count++] = &s->voices[i]; }
++    }
++    if (!count) {
++        memset(pcm, 0, frames * 2 * sizeof(*pcm));
++        s->lfo_phase += frames * UINT32_C(447392);
++        return;
++    }
++    for (unsigned f = 0; f < frames; f++) {
++        int32_t left = 0, right = 0;
++        for (unsigned i = 0; i < count; i++) {
++            DB2010MidiVoice *v = active[i];
+             if (!v->velocity) { continue; }
+             /* Starts at zero and rises; signed amplitude [-32768,32767]. */
+             uint32_t phase = v->phase + UINT32_C(0x40000000);
+@@ -141,12 +217,26 @@ void db2010_midi_render(DB2010MidiSynth *s, int16_t *pcm, unsigned frames)
+             int32_t value = (ramp < 65536 ? ramp : 131071 - ramp) - 32768;
+             value = value * v->velocity / 127;
+             value = value * s->volume[v->channel] / 127;
++            if (s->expression[v->channel] != 127) {
++                value = value * s->expression[v->channel] / 127;
++            }
+             if (!v->held) { value = value * v->release / DB2010_MIDI_RELEASE; }
+             /* Fixed 40-voice headroom: no note-count-dependent pumping. */
+-            sum += value / DB2010_MIDI_VOICES;
+-            v->phase += v->step;
++            value /= DB2010_MIDI_VOICES;
++            int pan = s->pan[v->channel];
++            left += pan <= 64 ? value : value * (127 - pan) / 63;
++            right += pan >= 64 ? value : value * pan / 64;
++            uint32_t step = v->step;
++            unsigned modulation = s->modulation[v->channel];
++            if (modulation) {
++                uint32_t ramp = s->lfo_phase >> 15;
++                int32_t wave = (ramp < 65536 ? ramp : 131071 - ramp) - 32768;
++                step += (int64_t)step * wave * modulation / (32768 * 127 * 32);
++            }
++            v->phase += step;
+             if (!v->held && !--v->release) { v->velocity = 0; }
+         }
+-        pcm[f * 2] = pcm[f * 2 + 1] = sum;
++        pcm[f * 2] = left; pcm[f * 2 + 1] = right;
++        s->lfo_phase += UINT32_C(447392);
+     }
+ }
+diff --git a/hw/arm/db2010-midi-synth.h b/hw/arm/db2010-midi-synth.h
+index e773003..a4835c8 100644
+--- a/hw/arm/db2010-midi-synth.h
++++ b/hw/arm/db2010-midi-synth.h
+@@ -15,12 +15,18 @@ typedef struct DB2010MidiSynth {
+     DB2010MidiVoice voices[DB2010_MIDI_VOICES];
+     uint8_t program[16];
+     uint8_t volume[16];
++    uint8_t expression[16], pan[16], modulation[16];
+     uint16_t bank[16];
+     uint16_t bend[16];
++    uint16_t enabled_channels;
++    uint8_t gm_mode;
++    uint32_t lfo_phase;
+     uint64_t notes, stolen;
+ } DB2010MidiSynth;
+ void db2010_midi_synth_init(DB2010MidiSynth *s);
+ const char *db2010_midi_event(DB2010MidiSynth *s, unsigned status,
+                              unsigned data1, unsigned data2);
++const char *db2010_midi_long_event(DB2010MidiSynth *s, unsigned type,
++                                  const uint16_t *data, unsigned count);
+ void db2010_midi_render(DB2010MidiSynth *s, int16_t *pcm, unsigned frames);
+ #endif
+diff --git a/hw/arm/db2010-sim-card.c b/hw/arm/db2010-sim-card.c
+index e702cb2..9d2d176 100644
+--- a/hw/arm/db2010-sim-card.c
++++ b/hw/arm/db2010-sim-card.c
+@@ -38,8 +38,8 @@ void dbsim_card_init(DB2010SimCard *c)
+         {0x7f20,0x6f78,0,2}, {0x7f20,0x6f7b,0,12},
+         {0x7f20,0x6f16,0,3}, {0x7f20,0x6f14,0,16},
+     };
+-    G_STATIC_ASSERT(ARRAY_SIZE(profile) == DBSIM_FILES);
+-    for (unsigned i = 0; i < DBSIM_FILES; i++) {
++    G_STATIC_ASSERT(ARRAY_SIZE(profile) == DBSIM_LEGACY_FILES);
++    for (unsigned i = 0; i < DBSIM_LEGACY_FILES; i++) {
+         c->files[i] = (DB2010SimFile){.parent=profile[i].parent,.id=profile[i].id,
+             .structure=profile[i].structure,.size=profile[i].size};
+     }
+@@ -57,11 +57,30 @@ void dbsim_card_init(DB2010SimCard *c)
+     memset(c->files[18].data,0xff,16); memcpy(c->files[18].data,"UA-KYIVSTAR",11);
+     c->df=0x3f00; c->input_need=5;
+ }
++void dbsim_card_init_ph0nix(DB2010SimCard *c)
++{
++    dbsim_card_init(c);
++    /* TS 24.008 mobile identity: IMSI 001010123456789, odd digit count,
++     * identity type 1. MCC 001 is a test network; there is no subscriber
++     * key or live cellular service. The legacy stub's identity nibble 0
++     * was invalid and could make the firmware reject the card. */
++    static const uint8_t imsi[] = {8,0x09,0x10,0x10,0x10,0x32,0x54,0x76,0x98};
++    memcpy(c->files[5].data, imsi, sizeof(imsi));
++    /* TS 51.011: SST service 17 (SPN) allocated and activated. */
++    c->files[8].size = 5; c->files[8].data[4] = 3;
++    memset(c->files[18].data, 0xff, 16);
++    memcpy(c->files[18].data, "ph0nix", 6); /* CPHS operator name */
++    DB2010SimFile *spn = &c->files[DBSIM_LEGACY_FILES];
++    *spn = (DB2010SimFile){.parent=0x7f20,.id=0x6f46,.size=17,.structure=0};
++    memset(spn->data, 0xff, spn->size);
++    spn->data[0] = 0; /* Display SPN on the home PLMN. */
++    memcpy(spn->data + 1, "ph0nix", 6);
++}
+ static DB2010SimFile *find(DB2010SimCard *c, uint16_t id)
+ {
+     for (unsigned i=0;i<DBSIM_FILES;i++) {
+         DB2010SimFile *f=&c->files[i];
+-        if (f->id==id && (f->structure<0 || f->parent==c->df)) { return f; }
++        if (f->id && f->id==id && (f->structure<0 || f->parent==c->df)) { return f; }
+     }
+     return NULL;
+ }
+diff --git a/hw/arm/db2010-sim-card.h b/hw/arm/db2010-sim-card.h
+index 0ec72df..7d2be93 100644
+--- a/hw/arm/db2010-sim-card.h
++++ b/hw/arm/db2010-sim-card.h
+@@ -4,7 +4,8 @@
+ #define DB2010_SIM_CARD_H
+ #include <stdint.h>
+ #include <stdbool.h>
+-#define DBSIM_FILES 19
++#define DBSIM_LEGACY_FILES 19
++#define DBSIM_FILES 20
+ #define DBSIM_QUEUE 512
+ typedef struct DB2010SimFile {
+     uint16_t parent, id, size;
+@@ -22,6 +23,7 @@ typedef struct DB2010SimCard {
+     uint8_t last_header[5];
+ } DB2010SimCard;
+ void dbsim_card_init(DB2010SimCard *c);
++void dbsim_card_init_ph0nix(DB2010SimCard *c);
+ void dbsim_card_activate(DB2010SimCard *c);
+ const char *dbsim_card_input(DB2010SimCard *c, uint8_t value);
+ uint8_t dbsim_card_pop(DB2010SimCard *c);
+diff --git a/hw/arm/db2010-simif.c b/hw/arm/db2010-simif.c
+index 7d3ce97..0c97df0 100644
+--- a/hw/arm/db2010-simif.c
++++ b/hw/arm/db2010-simif.c
+@@ -23,11 +23,14 @@ void dbsim_reset(DB2010Simif *s)
+     DB2010Signal rx=s->rx_irq, tx=s->tx_irq;
+     bool omit=s->omit_diagnostics;
+     bool has_setup=s->has_setup_initial;
++    bool ph0nix=s->ph0nix_card;
+     uint8_t setup=s->setup_initial;
+     *s=(DB2010Simif){.omit_diagnostics=omit,.byte_ns=ns,.rx_irq=rx,.tx_irq=tx,.rx_due=-1,.tx_due=-1,
+-        .has_setup_initial=has_setup,.setup_initial=setup,.setup_known=has_setup};
++        .has_setup_initial=has_setup,.setup_initial=setup,.setup_known=has_setup,.ph0nix_card=ph0nix};
+     if (has_setup) { s->regs[1]=setup; }
+-    dbsim_card_init(&s->card); update_irq(s);
++    if (ph0nix) { dbsim_card_init_ph0nix(&s->card); }
++    else { dbsim_card_init(&s->card); }
++    update_irq(s);
+ }
+ void dbsim_advance(DB2010Simif *s, uint64_t now)
+ {
+@@ -134,6 +137,7 @@ void dbsim_export(DB2010Simif *s, QDict *snapshot)
+ {
+     QDict *out=qdict_new(); QList *history=qlist_new();
+     qdict_put_str(out,"profile","pmb7850-gsm-stub-native-simif");
++    qdict_put_str(out,"card_profile",s->ph0nix_card ? "ph0nix-test-sim" : "legacy-stub");
+     qdict_put_bool(out,"synthetic",true); qdict_put_int(out,"byte_ns",s->byte_ns);
+     if (s->has_setup_initial) { qdict_put_int(out,"setup_initial_value",s->setup_initial); }
+     else { qdict_put_null(out,"setup_initial_value"); }
+diff --git a/hw/arm/db2010-simif.h b/hw/arm/db2010-simif.h
+index 490996f..e2c69c4 100644
+--- a/hw/arm/db2010-simif.h
++++ b/hw/arm/db2010-simif.h
+@@ -15,6 +15,7 @@ typedef struct DB2010Simif {
+     bool omit_diagnostics;
+     uint32_t byte_ns;
+     bool has_setup_initial;
++    bool ph0nix_card;
+     uint8_t setup_initial;
+     uint8_t regs[8];
+     bool active, rx_ready, tx_ready, tx_event, setup_known;

@@ -1,0 +1,110 @@
+name: Native applications
+env:
+  UNICORN_NO_PKG_CONFIG: '1'
+on:
+  workflow_dispatch:
+  push:
+    paths: ['native/**', 'frontends/**', 'assets/branding/**', 'Cargo.*', 'qemu', 'dependencies/**', 'src/db2010/development/source.py', '.github/workflows/native-apps.yml']
+  pull_request:
+    paths: ['native/**', 'frontends/**', 'assets/branding/**', 'Cargo.*', 'qemu', 'dependencies/**', 'src/db2010/development/source.py', '.github/workflows/native-apps.yml']
+jobs:
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+      - run: sudo apt-get update && sudo apt-get install -y clang-19 lld-19 llvm-19 libclang-19-dev cmake ninja-build pkg-config python3-venv
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;29.0.14206865'
+      - run: python3 -m venv build/android/host-tools
+      - run: build/android/host-tools/bin/python -m pip install meson==1.11.1
+      - name: Build and check APK
+        working-directory: frontends/android
+        run: |
+          export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.14206865"
+          export FEATUREPHONE_PYTHON="$GITHUB_WORKSPACE/build/android/host-tools/bin/python"
+          export PATH="$GITHUB_WORKSPACE/build/android/host-tools/bin:$PATH"
+          ./gradlew --no-daemon assembleRelease lintRelease testDebugUnitTest
+      - name: Verify packaged Android code and native libraries
+        run: |
+          python3 frontends/android/build-support/verify_apk.py \
+            frontends/android/app/build/outputs/apk/release/app-release.apk \
+            --ndk "$ANDROID_HOME/ndk/29.0.14206865" \
+            --aapt2 "$ANDROID_HOME/build-tools/35.0.0/aapt2" \
+            --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
+            --report build/android/apk-verification.json
+      - name: Package Android release
+        run: |
+          mkdir -p dist/release
+          cp frontends/android/app/build/outputs/apk/release/app-release.apk dist/release/ph0nix-1.0-android-arm64.apk
+          cp build/android/apk-verification.json dist/release/android-verification.json
+          cp build/android/qemu/provenance.json dist/release/android-engine-provenance.json
+          cd dist/release
+          sha256sum ph0nix-1.0-android-arm64.apk > ph0nix-1.0-android-arm64.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ph0nix-1.0-android-arm64
+          path: |
+            dist/release/*
+            frontends/android/app/build/test-results/testDebugUnitTest/*.xml
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      - run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev libgtk-3-dev libclang-dev clang lld zlib1g-dev ninja-build pkg-config cmake libxkbcommon-dev libasound2-dev libfdt-dev
+      - run: python3 -m pip install meson==1.11.1
+      - run: cargo test --locked -p db2010-host -p k750-native -p featurephone-desktop
+      - run: python3 frontends/build_desktop.py --jobs 2
+      - run: python3 scripts/package_release.py dist/ph0nix-linux-x86_64 --platform linux --arch x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ph0nix-1.0-linux-x86_64
+          path: dist/release/*
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - name: Preserve authenticated source line endings
+        shell: pwsh
+        run: git config --global core.autocrlf false
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git make mingw-w64-x86_64-gcc mingw-w64-x86_64-rust
+            mingw-w64-x86_64-python mingw-w64-x86_64-python-pip
+            mingw-w64-x86_64-ninja mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-pkgconf mingw-w64-x86_64-glib2
+            mingw-w64-x86_64-gtk3 mingw-w64-x86_64-zlib
+            mingw-w64-x86_64-clang mingw-w64-x86_64-libiconv
+            mingw-w64-x86_64-dtc
+      - run: cargo test --locked -p db2010-host -p k750-native -p featurephone-desktop
+      - run: python frontends/build_desktop.py --jobs 2
+      - run: python scripts/package_release.py dist/ph0nix-windows-x86_64 --platform windows --arch x86_64
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ph0nix-1.0-windows-x86_64
+          path: dist/release/*

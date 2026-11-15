@@ -1,0 +1,218 @@
+diff --git a/hw/arm/db2010-components.h b/hw/arm/db2010-components.h
+--- a/hw/arm/db2010-components.h
++++ b/hw/arm/db2010-components.h
+@@ -204,6 +204,8 @@
+ QDict *db2010_display_cached(DB2010Display *s, bool pixels);
+ void db2010_display_cache_restore(DB2010Display *s);
+ void db2010_display_cache_free(DB2010Display *s);
++void db2010_display_stream_init(DB2010Display *s);
++bool db2010_display_stream_enabled(DB2010Display *s);
+ void db2010_fa_reset(DB2010FaLink *s);
+ void dbreg_reset(DB2010RegisterBank *s);
+ void dbfc_export(DB2010F500Control *model, QDict *snapshot);
+diff --git a/hw/arm/db2010-display.c b/hw/arm/db2010-display.c
+--- a/hw/arm/db2010-display.c
++++ b/hw/arm/db2010-display.c
+@@ -1,16 +1,145 @@
+ /* Display capture owner. SPDX-License-Identifier: GPL-2.0-or-later */
+ #include "qemu/osdep.h"
+ #include "qemu/cutils.h"
++#include "qemu/bswap.h"
++#include "qapi/error.h"
+ #include "db2010-components.h"
+ #include "qobject/qdict.h"
+ #include "qobject/qlist.h"
++
++typedef struct DB2010LcdPacket {
++    GBytes *pixels;
++    uint8_t header[24];
++    size_t offset;
++} DB2010LcdPacket;
+ 
+ typedef struct DB2010DisplayCache {
+     GMutex lock;
+     GBytes *pixels;
+     uint64_t frames, completed, started;
+     unsigned known;
++    /* Disposable presentation transport, protected by the BQL. Keep one
++     * partial packet and one latest panel; a slow client never stalls DMA. */
++    CharFrontend chr;
++    DB2010LcdPacket *sending, *latest;
++    guint watch;
++    bool stream_enabled;
+ } DB2010DisplayCache;
++
++static void lcd_packet_free(DB2010LcdPacket *packet)
++{
++    if (!packet) { return; }
++    g_bytes_unref(packet->pixels);
++    g_free(packet);
++}
++
++static void lcd_stream_clear(DB2010DisplayCache *cache)
++{
++    if (cache->watch) { g_source_remove(cache->watch); cache->watch = 0; }
++    g_clear_pointer(&cache->sending, lcd_packet_free);
++    g_clear_pointer(&cache->latest, lcd_packet_free);
++}
++
++static void lcd_stream_flush(DB2010DisplayCache *cache);
++
++static gboolean lcd_stream_writable(void *unused, GIOCondition condition,
++                                    void *opaque)
++{
++    DB2010DisplayCache *cache = opaque;
++    cache->watch = 0;
++    if (condition & (G_IO_HUP | G_IO_ERR)) { lcd_stream_clear(cache); }
++    else { lcd_stream_flush(cache); }
++    return G_SOURCE_REMOVE;
++}
++
++static void lcd_stream_flush(DB2010DisplayCache *cache)
++{
++    while (cache->sending || cache->latest) {
++        if (!cache->sending) { cache->sending = g_steal_pointer(&cache->latest); }
++        DB2010LcdPacket *packet = cache->sending;
++        gsize size;
++        const uint8_t *pixels = g_bytes_get_data(packet->pixels, &size);
++        const uint8_t *data;
++        size_t length;
++        if (packet->offset < sizeof(packet->header)) {
++            data = packet->header + packet->offset;
++            length = sizeof(packet->header) - packet->offset;
++        } else {
++            size_t offset = packet->offset - sizeof(packet->header);
++            data = pixels + offset;
++            length = size - offset;
++        }
++        int n = qemu_chr_fe_write(&cache->chr, data, length);
++        if (n < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
++            lcd_stream_clear(cache);
++            qemu_chr_fe_disconnect(&cache->chr);
++            return;
++        }
++        if (n <= 0) { break; }
++        packet->offset += n;
++        if (packet->offset == sizeof(packet->header) + size) {
++            g_clear_pointer(&cache->sending, lcd_packet_free);
++        }
++    }
++    if (cache->sending && !cache->watch) {
++        cache->watch = qemu_chr_fe_add_watch(&cache->chr,
++            G_IO_OUT | G_IO_HUP | G_IO_ERR, lcd_stream_writable, cache);
++        if (!cache->watch) {
++            lcd_stream_clear(cache);
++            qemu_chr_fe_disconnect(&cache->chr);
++        }
++    }
++}
++
++static void lcd_stream_publish(DB2010DisplayCache *cache)
++{
++    if (!cache->stream_enabled || !qemu_chr_fe_backend_open(&cache->chr)) { return; }
++    g_mutex_lock(&cache->lock);
++    if (!cache->pixels) { g_mutex_unlock(&cache->lock); return; }
++    DB2010LcdPacket *packet = g_new0(DB2010LcdPacket, 1);
++    packet->pixels = g_bytes_ref(cache->pixels);
++    memcpy(packet->header, "K750", 4);
++    stw_be_p(packet->header + 4, 1); /* Envelope version. */
++    stw_be_p(packet->header + 6, 1); /* RGB565, big endian. */
++    stw_be_p(packet->header + 8, 176);
++    stw_be_p(packet->header + 10, 220);
++    stl_be_p(packet->header + 12, DBPANEL_PIXELS * 2);
++    stq_be_p(packet->header + 16, cache->frames);
++    g_mutex_unlock(&cache->lock);
++    /* Never replace a partially written envelope. The next complete frame
++     * replaces every wholly unsent one, so neither end builds a frame queue. */
++    if (cache->sending && !cache->sending->offset) {
++        g_clear_pointer(&cache->sending, lcd_packet_free);
++    }
++    g_clear_pointer(&cache->latest, lcd_packet_free);
++    cache->latest = packet;
++    lcd_stream_flush(cache);
++}
++
++static void lcd_stream_event(void *opaque, QEMUChrEvent event)
++{
++    DB2010DisplayCache *cache = opaque;
++    if (event == CHR_EVENT_OPENED || event == CHR_EVENT_CLOSED) {
++        lcd_stream_clear(cache);
++        if (event == CHR_EVENT_OPENED) { lcd_stream_publish(cache); }
++    }
++}
++
++void db2010_display_stream_init(DB2010Display *s)
++{
++    DB2010DisplayCache *cache = s->observation;
++    Chardev *chr = qemu_chr_find("lcd");
++    if (!chr) { return; }
++    qemu_chr_fe_init(&cache->chr, chr, &error_fatal);
++    cache->stream_enabled = true;
++    qemu_chr_fe_set_handlers(&cache->chr, NULL, NULL, lcd_stream_event,
++                            NULL, cache, NULL, true);
++}
++
++bool db2010_display_stream_enabled(DB2010Display *s)
++{
++    return s->observation && s->observation->stream_enabled;
++}
+ 
+ static void cache_panel(DB2010Display *s, const uint8_t *pixels,
+                         unsigned known, uint64_t frames,
+@@ -28,6 +157,13 @@
+     cache->started = started;
+     g_mutex_unlock(&cache->lock);
+     if (previous) { g_bytes_unref(previous); }
++    if (!next) {
++        bool partial = cache->sending && cache->sending->offset;
++        lcd_stream_clear(cache);
++        if (partial) { qemu_chr_fe_disconnect(&cache->chr); }
++    } else {
++        lcd_stream_publish(cache);
++    }
+ }
+ 
+ QDict *db2010_display_cached(DB2010Display *s, bool pixels)
+@@ -94,6 +230,10 @@
+ void db2010_display_cache_free(DB2010Display *s)
+ {
+     if (!s->observation) { return; }
++    lcd_stream_clear(s->observation);
++    if (s->observation->stream_enabled) {
++        qemu_chr_fe_deinit(&s->observation->chr, false);
++    }
+     if (s->observation->pixels) { g_bytes_unref(s->observation->pixels); }
+     g_mutex_clear(&s->observation->lock);
+     g_free(s->observation);
+diff --git a/hw/arm/db2010.c b/hw/arm/db2010.c
+--- a/hw/arm/db2010.c
++++ b/hw/arm/db2010.c
+@@ -30,6 +30,7 @@
+     }
+     db2010_register_owners(s);
+     db2010_qom_realize(s);
++    db2010_display_stream_init(s->display);
+     s->cpu = ARM_CPU(cpu_create(machine->cpu_type));
+     db2010_validate_connections(s);
+     db2010_qom_connect(s);
+@@ -66,6 +67,12 @@
+ {
+     return DB2010_MACHINE(obj)->research_guards;
+ }
++
++static bool get_display_stream(Object *obj, Error **errp)
++{
++    DB2010MachineState *s = DB2010_MACHINE(obj);
++    return s->display && db2010_display_stream_enabled(s->display);
++}
+ static void set_research_guards(Object *obj, bool enabled, Error **errp)
+ {
+     DB2010MachineState *s = DB2010_MACHINE(obj);
+@@ -98,6 +105,7 @@
+     object_class_property_add_str(oc, "display", get_display, NULL);
+     object_class_property_add_str(oc, "display-cached", get_display_cached, NULL);
+     object_class_property_add_str(oc, "display-status", get_display_status, NULL);
++    object_class_property_add_bool(oc, "display-stream", get_display_stream, NULL);
+ }
+ 
+ static void db2010_finalize(Object *obj)

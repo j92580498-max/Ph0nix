@@ -1,0 +1,6 @@
+[submodule "qemu"]
+	path = qemu
+	url = https://github.com/qemu/qemu.git
+[submodule "dependencies/samsung"]
+	path = dependencies/samsung
+	url = https://github.com/tayga16/SamsungE380-Emu.git

@@ -1,0 +1,117 @@
+diff --git a/accel/tcg/cputlb.c b/accel/tcg/cputlb.c
+--- a/accel/tcg/cputlb.c
++++ b/accel/tcg/cputlb.c
+@@ -37,6 +37,7 @@
+ #include "exec/vaddr.h"
+ #include "tcg/tcg.h"
+ #include "qemu/error-report.h"
++#include "qemu/main-loop.h"
+ #include "exec/log.h"
+ #include "exec/helper-proto-common.h"
+ #include "exec/tlb-flags.h"
+@@ -2284,7 +2285,7 @@
+     return ret;
+ }
+ 
+-static void validate_board_io(CPUState *cpu, MMULookupLocals *l,
++static BQLLockAuto *validate_board_io(CPUState *cpu, MMULookupLocals *l,
+                                bool crosspage, vaddr address, unsigned size,
+                                bool write, uint64_t value,
+                                MMUAccessType type, uintptr_t ra)
+@@ -2294,8 +2295,15 @@
+         /* Like io_prepare(): retry a single I/O instruction before doing any
+          * validation or effects, so PC and virtual-clock reads are safe. */
+         if (!cpu->neg.can_do_io) { cpu_io_recompile(cpu, ra); }
++        /* Keep preflight and all split MMIO fragments in one transaction.
++         * Otherwise native virtual timers can invalidate an accepted command
++         * before its committed callback, losing effects or acknowledgements.
++         * CPU longjmp cleanup releases the BQL if validation rejects it. */
++        BQLLockAuto *lock = bql_auto_lock(__FILE__, __LINE__);
+         cpu->cc->tcg_ops->validate_io(cpu, address, size, write, value, ra);
+-    }
++        return lock;
++    }
++    return NULL;
+ }
+ 
+ static uint8_t do_ld1_mmu(CPUState *cpu, vaddr addr, MemOpIdx oi,
+@@ -2306,7 +2314,8 @@
+ 
+     cpu_req_mo(cpu, TCG_MO_LD_LD | TCG_MO_ST_LD);
+     crosspage = mmu_lookup(cpu, addr, oi, ra, access_type, &l);
+-    validate_board_io(cpu, &l, crosspage, addr, 1, false, 0, access_type, ra);
++    g_autoptr(BQLLockAuto) board_io_lock =
++        validate_board_io(cpu, &l, crosspage, addr, 1, false, 0, access_type, ra);
+     tcg_debug_assert(!crosspage);
+ 
+     return do_ld_1(cpu, &l.page[0], l.mmu_idx, access_type, ra);
+@@ -2322,7 +2331,8 @@
+ 
+     cpu_req_mo(cpu, TCG_MO_LD_LD | TCG_MO_ST_LD);
+     crosspage = mmu_lookup(cpu, addr, oi, ra, access_type, &l);
+-    validate_board_io(cpu, &l, crosspage, addr, 2, false, 0, access_type, ra);
++    g_autoptr(BQLLockAuto) board_io_lock =
++        validate_board_io(cpu, &l, crosspage, addr, 2, false, 0, access_type, ra);
+     if (likely(!crosspage)) {
+         return do_ld_2(cpu, &l.page[0], l.mmu_idx, access_type, l.memop, ra);
+     }
+@@ -2347,7 +2357,8 @@
+ 
+     cpu_req_mo(cpu, TCG_MO_LD_LD | TCG_MO_ST_LD);
+     crosspage = mmu_lookup(cpu, addr, oi, ra, access_type, &l);
+-    validate_board_io(cpu, &l, crosspage, addr, 4, false, 0, access_type, ra);
++    g_autoptr(BQLLockAuto) board_io_lock =
++        validate_board_io(cpu, &l, crosspage, addr, 4, false, 0, access_type, ra);
+     if (likely(!crosspage)) {
+         return do_ld_4(cpu, &l.page[0], l.mmu_idx, access_type, l.memop, ra);
+     }
+@@ -2369,7 +2380,8 @@
+ 
+     cpu_req_mo(cpu, TCG_MO_LD_LD | TCG_MO_ST_LD);
+     crosspage = mmu_lookup(cpu, addr, oi, ra, access_type, &l);
+-    validate_board_io(cpu, &l, crosspage, addr, 8, false, 0, access_type, ra);
++    g_autoptr(BQLLockAuto) board_io_lock =
++        validate_board_io(cpu, &l, crosspage, addr, 8, false, 0, access_type, ra);
+     if (likely(!crosspage)) {
+         return do_ld_8(cpu, &l.page[0], l.mmu_idx, access_type, l.memop, ra);
+     }
+@@ -2711,7 +2723,8 @@
+ 
+     cpu_req_mo(cpu, TCG_MO_LD_ST | TCG_MO_ST_ST);
+     crosspage = mmu_lookup(cpu, addr, oi, ra, MMU_DATA_STORE, &l);
+-    validate_board_io(cpu, &l, crosspage, addr, 1, true, val, MMU_DATA_STORE, ra);
++    g_autoptr(BQLLockAuto) board_io_lock =
++        validate_board_io(cpu, &l, crosspage, addr, 1, true, val, MMU_DATA_STORE, ra);
+     tcg_debug_assert(!crosspage);
+ 
+     do_st_1(cpu, &l.page[0], val, l.mmu_idx, ra);
+@@ -2726,7 +2739,8 @@
+ 
+     cpu_req_mo(cpu, TCG_MO_LD_ST | TCG_MO_ST_ST);
+     crosspage = mmu_lookup(cpu, addr, oi, ra, MMU_DATA_STORE, &l);
+-    validate_board_io(cpu, &l, crosspage, addr, 2, true, val, MMU_DATA_STORE, ra);
++    g_autoptr(BQLLockAuto) board_io_lock =
++        validate_board_io(cpu, &l, crosspage, addr, 2, true, val, MMU_DATA_STORE, ra);
+     if (likely(!crosspage)) {
+         do_st_2(cpu, &l.page[0], val, l.mmu_idx, l.memop, ra);
+         return;
+@@ -2749,7 +2763,8 @@
+ 
+     cpu_req_mo(cpu, TCG_MO_LD_ST | TCG_MO_ST_ST);
+     crosspage = mmu_lookup(cpu, addr, oi, ra, MMU_DATA_STORE, &l);
+-    validate_board_io(cpu, &l, crosspage, addr, 4, true, val, MMU_DATA_STORE, ra);
++    g_autoptr(BQLLockAuto) board_io_lock =
++        validate_board_io(cpu, &l, crosspage, addr, 4, true, val, MMU_DATA_STORE, ra);
+     if (likely(!crosspage)) {
+         do_st_4(cpu, &l.page[0], val, l.mmu_idx, l.memop, ra);
+         return;
+@@ -2771,7 +2786,8 @@
+ 
+     cpu_req_mo(cpu, TCG_MO_LD_ST | TCG_MO_ST_ST);
+     crosspage = mmu_lookup(cpu, addr, oi, ra, MMU_DATA_STORE, &l);
+-    validate_board_io(cpu, &l, crosspage, addr, 8, true, val, MMU_DATA_STORE, ra);
++    g_autoptr(BQLLockAuto) board_io_lock =
++        validate_board_io(cpu, &l, crosspage, addr, 8, true, val, MMU_DATA_STORE, ra);
+     if (likely(!crosspage)) {
+         do_st_8(cpu, &l.page[0], val, l.mmu_idx, l.memop, ra);
+         return;

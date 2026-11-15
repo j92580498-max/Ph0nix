@@ -1,0 +1,4038 @@
+{
+  "source": {
+    "repository": "https://github.com/danylokos/db2010",
+    "commit": "f40f63cb9ecea89099187c8bab474b97d0179920",
+    "file": "src/db2010/resources/boot.json",
+    "sha256": "8c9f5bd5a3c491a9f9dfe2a832b54e477f3184735bb0aabbc4b357a48d4472a9"
+  },
+  "device_registers": [
+    {
+      "address": 4178116636,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-gating-control"
+    },
+    {
+      "address": 4178116638,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-transition-control"
+    },
+    {
+      "address": 4178116620,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-frequency-setup"
+    },
+    {
+      "address": 4178180096,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 1,
+      "name": "clock-completion-immediate"
+    },
+    {
+      "address": 4178116608,
+      "width": 2,
+      "initial_value": 32832,
+      "read_or_mask": 0,
+      "name": "clock-barrier-read"
+    },
+    {
+      "address": 4177592336,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "service-key-0xaa",
+      "access": "write-only",
+      "allowed_writes": [
+        170
+      ]
+    },
+    {
+      "address": 4177592356,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "service-key-0x5a",
+      "access": "write-only",
+      "allowed_writes": [
+        90
+      ]
+    },
+    {
+      "address": 4177592364,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "service-key-0xa5",
+      "access": "write-only",
+      "allowed_writes": [
+        165
+      ]
+    },
+    {
+      "address": 4178116612,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-select-gate-0xf9090004"
+    },
+    {
+      "address": 4178116614,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-select-gate-0xf9090006"
+    },
+    {
+      "address": 4178116630,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-select-gate-0xf9090016"
+    },
+    {
+      "address": 4178116632,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-select-gate-0xf9090018"
+    },
+    {
+      "address": 4178116634,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-select-gate-0xf909001a"
+    },
+    {
+      "address": 4178116624,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-init-0xf9090010"
+    },
+    {
+      "address": 4178116626,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-init-0xf9090012"
+    },
+    {
+      "address": 4178116628,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-init-0xf9090014"
+    },
+    {
+      "address": 4178116610,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-init-0xf9090002"
+    },
+    {
+      "address": 4178116616,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-init-0xf9090008"
+    },
+    {
+      "address": 4178116640,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-init-0xf9090020"
+    },
+    {
+      "address": 4178116642,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "clock-init-0xf9090022"
+    },
+    {
+      "address": 4211213060,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "banked-mask-control-0xfb020304"
+    },
+    {
+      "address": 4211213080,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "banked-mask-control-0xfb020318"
+    },
+    {
+      "address": 4211212572,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-0"
+    },
+    {
+      "address": 4211212576,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-1"
+    },
+    {
+      "address": 4211212580,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-2"
+    },
+    {
+      "address": 4211212584,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-3"
+    },
+    {
+      "address": 4211212588,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-4"
+    },
+    {
+      "address": 4211212592,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-5"
+    },
+    {
+      "address": 4211212596,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-6"
+    },
+    {
+      "address": 4211212600,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-7"
+    },
+    {
+      "address": 4211212604,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-8"
+    },
+    {
+      "address": 4211212608,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-9"
+    },
+    {
+      "address": 4211212612,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-10"
+    },
+    {
+      "address": 4211212616,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-11"
+    },
+    {
+      "address": 4211212620,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-12"
+    },
+    {
+      "address": 4211212624,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-13"
+    },
+    {
+      "address": 4211212628,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-14"
+    },
+    {
+      "address": 4211212632,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-15"
+    },
+    {
+      "address": 4211212636,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-16"
+    },
+    {
+      "address": 4211212640,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-17"
+    },
+    {
+      "address": 4211212644,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-18"
+    },
+    {
+      "address": 4211212648,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-19"
+    },
+    {
+      "address": 4211212652,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-20"
+    },
+    {
+      "address": 4211212656,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-21"
+    },
+    {
+      "address": 4211212660,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-22"
+    },
+    {
+      "address": 4211212664,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-23"
+    },
+    {
+      "address": 4211212668,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-24"
+    },
+    {
+      "address": 4211212672,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-25"
+    },
+    {
+      "address": 4211212676,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-26"
+    },
+    {
+      "address": 4211212680,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-27"
+    },
+    {
+      "address": 4211212684,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-28"
+    },
+    {
+      "address": 4211212688,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-29"
+    },
+    {
+      "address": 4211212692,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-30"
+    },
+    {
+      "address": 4211212696,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-0-line-31"
+    },
+    {
+      "address": 4211212828,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-0"
+    },
+    {
+      "address": 4211212832,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-1"
+    },
+    {
+      "address": 4211212836,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-2"
+    },
+    {
+      "address": 4211212840,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-3"
+    },
+    {
+      "address": 4211212844,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-4"
+    },
+    {
+      "address": 4211212848,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-5"
+    },
+    {
+      "address": 4211212852,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-6"
+    },
+    {
+      "address": 4211212856,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-7"
+    },
+    {
+      "address": 4211212860,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-8"
+    },
+    {
+      "address": 4211212864,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-9"
+    },
+    {
+      "address": 4211212868,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-10"
+    },
+    {
+      "address": 4211212872,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-11"
+    },
+    {
+      "address": 4211212876,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-12"
+    },
+    {
+      "address": 4211212880,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-13"
+    },
+    {
+      "address": 4211212884,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-14"
+    },
+    {
+      "address": 4211212888,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-15"
+    },
+    {
+      "address": 4211212892,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-16"
+    },
+    {
+      "address": 4211212896,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-17"
+    },
+    {
+      "address": 4211212900,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-18"
+    },
+    {
+      "address": 4211212904,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-19"
+    },
+    {
+      "address": 4211212908,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-20"
+    },
+    {
+      "address": 4211212912,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-21"
+    },
+    {
+      "address": 4211212916,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-22"
+    },
+    {
+      "address": 4211212920,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-23"
+    },
+    {
+      "address": 4211212924,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-24"
+    },
+    {
+      "address": 4211212928,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-25"
+    },
+    {
+      "address": 4211212932,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-26"
+    },
+    {
+      "address": 4211212936,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-27"
+    },
+    {
+      "address": 4211212940,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-28"
+    },
+    {
+      "address": 4211212944,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-29"
+    },
+    {
+      "address": 4211212948,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-30"
+    },
+    {
+      "address": 4211212952,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-1-line-31"
+    },
+    {
+      "address": 4211213084,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-0"
+    },
+    {
+      "address": 4211213088,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-1"
+    },
+    {
+      "address": 4211213092,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-2"
+    },
+    {
+      "address": 4211213096,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-3"
+    },
+    {
+      "address": 4211213100,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-4"
+    },
+    {
+      "address": 4211213104,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-5"
+    },
+    {
+      "address": 4211213108,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-6"
+    },
+    {
+      "address": 4211213112,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-7"
+    },
+    {
+      "address": 4211213116,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-8"
+    },
+    {
+      "address": 4211213120,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-9"
+    },
+    {
+      "address": 4211213124,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-10"
+    },
+    {
+      "address": 4211213128,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-11"
+    },
+    {
+      "address": 4211213132,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-12"
+    },
+    {
+      "address": 4211213136,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-13"
+    },
+    {
+      "address": 4211213140,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-14"
+    },
+    {
+      "address": 4211213144,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-15"
+    },
+    {
+      "address": 4211213148,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-16"
+    },
+    {
+      "address": 4211213152,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-17"
+    },
+    {
+      "address": 4211213156,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-18"
+    },
+    {
+      "address": 4211213160,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-19"
+    },
+    {
+      "address": 4211213164,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-20"
+    },
+    {
+      "address": 4211213168,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-21"
+    },
+    {
+      "address": 4211213172,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-22"
+    },
+    {
+      "address": 4211213176,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-23"
+    },
+    {
+      "address": 4211213180,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-24"
+    },
+    {
+      "address": 4211213184,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-25"
+    },
+    {
+      "address": 4211213188,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-26"
+    },
+    {
+      "address": 4211213192,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-27"
+    },
+    {
+      "address": 4211213196,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-28"
+    },
+    {
+      "address": 4211213200,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-29"
+    },
+    {
+      "address": 4211213204,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-30"
+    },
+    {
+      "address": 4211213208,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "irq-level-bank-2-line-31"
+    },
+    {
+      "address": 4143972904,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "cdi-activation-command",
+      "access": "write-only",
+      "allowed_writes": [
+        255
+      ]
+    },
+    {
+      "address": 4177854558,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "rtc-init-command",
+      "access": "write-only",
+      "allowed_writes": [
+        2
+      ]
+    },
+    {
+      "address": 4177854540,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "rtc-absolute-year-century"
+    },
+    {
+      "address": 4177854538,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "rtc-absolute-year-low"
+    },
+    {
+      "address": 4177854496,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "rtc-alarm-control"
+    },
+    {
+      "address": 4177854486,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "rtc-selector-control"
+    },
+    {
+      "address": 4228120586,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-1-init-command",
+      "access": "write-only",
+      "allowed_writes": [
+        7
+      ]
+    },
+    {
+      "address": 4228120594,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-1-init-control"
+    },
+    {
+      "address": 4211343370,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-4-init-command",
+      "access": "write-only",
+      "allowed_writes": [
+        7
+      ]
+    },
+    {
+      "address": 4211343378,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-4-init-control"
+    },
+    {
+      "address": 4178116618,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "irda-clock-gate-control"
+    },
+    {
+      "address": 4228186120,
+      "width": 4,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "fc050-init-control-0x8"
+    },
+    {
+      "address": 4228186124,
+      "width": 4,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "fc050-init-control-0xc"
+    },
+    {
+      "address": 4228186140,
+      "width": 4,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "fc050-init-control-0x1c"
+    },
+    {
+      "address": 4177526784,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-0-init-word-0"
+    },
+    {
+      "address": 4177526786,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-0-init-word-2"
+    },
+    {
+      "address": 4177526788,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-0-init-word-4"
+    },
+    {
+      "address": 4177526796,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-1-init-word-2"
+    },
+    {
+      "address": 4177526798,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-1-init-word-4"
+    },
+    {
+      "address": 4177526804,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 16,
+      "name": "gpio-bank-2-init-word-0"
+    },
+    {
+      "address": 4177526806,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-2-init-word-2"
+    },
+    {
+      "address": 4177526808,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-2-init-word-4"
+    },
+    {
+      "address": 4177526814,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-3-init-word-0"
+    },
+    {
+      "address": 4177526816,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-3-init-word-2"
+    },
+    {
+      "address": 4177526818,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-3-init-word-4"
+    },
+    {
+      "address": 4177526824,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-4-init-word-0"
+    },
+    {
+      "address": 4177526826,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-4-init-word-2"
+    },
+    {
+      "address": 4177526828,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-4-init-word-4"
+    },
+    {
+      "address": 4177526844,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-0-event-mask-control"
+    },
+    {
+      "address": 4177526848,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-1-event-mask-control"
+    },
+    {
+      "address": 4177526852,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-2-event-mask-control"
+    },
+    {
+      "address": 4177526856,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-3-event-mask-control"
+    },
+    {
+      "address": 4177526892,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-4-event-mask-control"
+    },
+    {
+      "address": 4177526790,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-0-mode-control"
+    },
+    {
+      "address": 4177526800,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-1-mode-control"
+    },
+    {
+      "address": 4177526810,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-2-mode-control"
+    },
+    {
+      "address": 4177526820,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-3-mode-control"
+    },
+    {
+      "address": 4177526830,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-group-4-mode-control"
+    },
+    {
+      "address": 4211474436,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-0-polled-init-4",
+      "access": "write-only",
+      "allowed_writes": [
+        7
+      ]
+    },
+    {
+      "address": 4211474444,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart0-open-config-0c-latch",
+      "access": "rw",
+      "allowed_writes": [
+        6145,
+        6177,
+        6401,
+        6465
+      ]
+    },
+    {
+      "address": 4211474454,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart0-flow-config-16-latch",
+      "access": "rw",
+      "allowed_writes": [
+        0,
+        192
+      ]
+    },
+    {
+      "address": 4211474464,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart0-open-config-20-latch",
+      "access": "rw",
+      "allowed_writes": [
+        1,
+        4,
+        48
+      ]
+    },
+    {
+      "address": 4211474466,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-0-polled-init-22",
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4211474470,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-0-polled-init-26",
+      "access": "write-only",
+      "allowed_writes": [
+        13000
+      ]
+    },
+    {
+      "address": 4110419996,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "f500_081c_zero_command_capture",
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4211212548,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "banked-mask-control-0xfb020104"
+    },
+    {
+      "address": 4211212568,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "banked-mask-control-0xfb020118"
+    },
+    {
+      "address": 4211212804,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "banked-mask-control-0xfb020204"
+    },
+    {
+      "address": 4211212824,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "banked-mask-control-0xfb020218"
+    },
+    {
+      "address": 4177526794,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "gpio-bank-1-init-word-0"
+    },
+    {
+      "address": 4177854548,
+      "width": 1,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "startup-A5-5A-byte-marker-hypothesis",
+      "allowed_writes": [
+        165,
+        90
+      ],
+      "rtc_halfword_alias": true
+    },
+    {
+      "address": 4194566152,
+      "width": 4,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa040008-transfer-prepare-command-hypothesis",
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4194435134,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa02003e-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        1,
+        0
+      ]
+    },
+    {
+      "address": 4194500670,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa03003e-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        1,
+        0
+      ]
+    },
+    {
+      "address": 4194435086,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa02000e-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        12288,
+        28672
+      ]
+    },
+    {
+      "address": 4194435088,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa020010-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        4112
+      ]
+    },
+    {
+      "address": 4194435102,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa02001e-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        3250
+      ]
+    },
+    {
+      "address": 4194435104,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa020020-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        3250
+      ]
+    },
+    {
+      "address": 4194435106,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa020022-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4194435108,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa020024-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4194435110,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa020026-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4194435112,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa020028-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        60
+      ]
+    },
+    {
+      "address": 4194435114,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "fa-setup-fa02002a-write-capture",
+      "access": "write-only",
+      "allowed_writes": [
+        40
+      ]
+    },
+    {
+      "address": 4194435072,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "fa02-control-cold-zero-latch-hypothesis",
+      "allowed_writes": [
+        512,
+        513
+      ]
+    },
+    {
+      "address": 4194500608,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "fa03-control-cold-zero-latch-hypothesis",
+      "allowed_writes": [
+        512,
+        513
+      ]
+    },
+    {
+      "address": 4177723396,
+      "width": 4,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "etx-status-bit0-clear-hypothesis",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110419968,
+      "width": 2,
+      "name": "power_start_control_bit14_latch_hypothesis",
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        16384
+      ]
+    },
+    {
+      "address": 4211474446,
+      "width": 2,
+      "initial_value": 16,
+      "read_or_mask": 0,
+      "access": "read-only",
+      "name": "uart0-open-status-bit4-hypothesis"
+    },
+    {
+      "address": 4211474438,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        128,
+        208,
+        221
+      ],
+      "name": "uart0-open-init-06-capture"
+    },
+    {
+      "address": 4211474440,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        128,
+        246,
+        255
+      ],
+      "name": "uart0-open-init-08-capture"
+    },
+    {
+      "address": 4211474456,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ],
+      "name": "uart0-open-init-18-capture"
+    },
+    {
+      "address": 4211474458,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        56
+      ],
+      "name": "uart0-open-init-1a-capture"
+    },
+    {
+      "address": 4211474460,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        17
+      ],
+      "name": "uart0-open-init-1c-capture"
+    },
+    {
+      "address": 4211474462,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        19
+      ],
+      "name": "uart0-open-init-1e-capture"
+    },
+    {
+      "address": 4211474468,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        10,
+        1,
+        5
+      ],
+      "name": "uart0-open-init-24-capture"
+    },
+    {
+      "address": 4143973120,
+      "width": 4,
+      "name": "f700_control",
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "access": "rw",
+      "allowed_writes": [
+        0,
+        512,
+        576,
+        704,
+        736,
+        743
+      ]
+    },
+    {
+      "address": 4110420084,
+      "width": 2,
+      "name": "f500_0874_command_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        17,
+        18,
+        1,
+        2
+      ]
+    },
+    {
+      "address": 4143973124,
+      "width": 4,
+      "name": "display stream control",
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "access": "rw",
+      "allowed_writes": [
+        0,
+        32,
+        288,
+        800
+      ]
+    },
+    {
+      "address": 4177854542,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0
+      ],
+      "name": "rtc-preserved-word-f905004e"
+    },
+    {
+      "address": 4177854544,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0
+      ],
+      "name": "rtc-preserved-word-f9050050"
+    },
+    {
+      "address": 4177854546,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0
+      ],
+      "name": "rtc-preserved-word-f9050052"
+    },
+    {
+      "address": 4177854550,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0
+      ],
+      "name": "rtc-preserved-word-f9050056"
+    },
+    {
+      "address": 4227923984,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        128
+      ],
+      "name": "memorystick-interrupt-control-hypothesis"
+    },
+    {
+      "address": 4227923976,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        64,
+        96
+      ],
+      "name": "memorystick-clock-control-hypothesis"
+    },
+    {
+      "address": 4227923980,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0
+      ],
+      "name": "memorystick-preserved-control-hypothesis"
+    },
+    {
+      "address": 4227924012,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "name": "memorystick-empty-fifo-count-hypothesis",
+      "access": "read-only"
+    },
+    {
+      "address": 4228055050,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart3-open-config-0a-latch",
+      "access": "rw",
+      "allowed_writes": [
+        0,
+        7,
+        256
+      ]
+    },
+    {
+      "address": 4228055044,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-3-polled-init-4",
+      "access": "write-only",
+      "allowed_writes": [
+        7
+      ]
+    },
+    {
+      "address": 4228055052,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart3-open-config-0c-latch",
+      "access": "rw",
+      "allowed_writes": [
+        6145,
+        6177
+      ]
+    },
+    {
+      "address": 4228055062,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-3-polled-init-16",
+      "access": "write-only",
+      "allowed_writes": [
+        0,
+        192
+      ]
+    },
+    {
+      "address": 4228055072,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart3-open-config-20-latch",
+      "access": "rw",
+      "allowed_writes": [
+        4,
+        16,
+        2
+      ]
+    },
+    {
+      "address": 4228055074,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-3-polled-init-22",
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4228055078,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "name": "uart-3-polled-init-26",
+      "access": "write-only",
+      "allowed_writes": [
+        13000
+      ]
+    },
+    {
+      "address": 4228055054,
+      "width": 2,
+      "initial_value": 16,
+      "read_or_mask": 0,
+      "access": "read-only",
+      "name": "uart3-open-status-bit4-hypothesis"
+    },
+    {
+      "address": 4228055046,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        128,
+        208,
+        116
+      ],
+      "name": "uart3-open-init-06-capture"
+    },
+    {
+      "address": 4228055048,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        128,
+        246,
+        182
+      ],
+      "name": "uart3-open-init-08-capture"
+    },
+    {
+      "address": 4228055064,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ],
+      "name": "uart3-open-init-18-capture"
+    },
+    {
+      "address": 4228055066,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        56
+      ],
+      "name": "uart3-open-init-1a-capture"
+    },
+    {
+      "address": 4228055068,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        17
+      ],
+      "name": "uart3-open-init-1c-capture"
+    },
+    {
+      "address": 4228055070,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        19
+      ],
+      "name": "uart3-open-init-1e-capture"
+    },
+    {
+      "address": 4228055076,
+      "width": 2,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1,
+        10
+      ],
+      "name": "uart3-open-init-24-capture"
+    },
+    {
+      "address": 4178116622,
+      "width": 2,
+      "initial_value": 24,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        24
+      ],
+      "name": "clock-transition-delay-config-hypothesis"
+    },
+    {
+      "address": 4177526834,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        1,
+        2,
+        3,
+        8,
+        9,
+        10,
+        11,
+        16,
+        17,
+        18,
+        19,
+        24,
+        25,
+        26,
+        27,
+        32,
+        33,
+        34,
+        35,
+        40,
+        41,
+        42,
+        43,
+        48,
+        49,
+        50,
+        51,
+        56,
+        57,
+        58,
+        59
+      ],
+      "name": "pwm1_control_latch_hypothesis"
+    },
+    {
+      "address": 4110420098,
+      "width": 1,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0
+      ],
+      "name": "prototype-byte-clear-0x882"
+    },
+    {
+      "address": 4110420099,
+      "width": 1,
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        4
+      ],
+      "name": "prototype-byte-clear-0x883"
+    },
+    {
+      "address": 4110420096,
+      "width": 1,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        1,
+        5,
+        21,
+        53,
+        117,
+        127,
+        191,
+        223,
+        239,
+        245,
+        247,
+        251,
+        253,
+        254,
+        255
+      ],
+      "name": "prototype-byte-setup-0x880"
+    },
+    {
+      "address": 4110420097,
+      "width": 1,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        8,
+        127,
+        136,
+        191,
+        200,
+        202,
+        206,
+        207,
+        223,
+        239,
+        247,
+        251,
+        253,
+        254,
+        255
+      ],
+      "name": "prototype-byte-setup-0x881"
+    },
+    {
+      "address": 4110420100,
+      "width": 1,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        64,
+        96,
+        97,
+        99,
+        103,
+        111,
+        127,
+        255
+      ],
+      "name": "prototype-byte-setup-0x884"
+    },
+    {
+      "address": 4110419978,
+      "width": 2,
+      "name": "f500_setup_080a_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        4999
+      ],
+      "access": "write-only"
+    },
+    {
+      "address": 4110419976,
+      "width": 2,
+      "name": "f500_setup_0808_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0
+      ],
+      "access": "write-only"
+    },
+    {
+      "address": 4110420024,
+      "width": 2,
+      "name": "f500_setup_0838_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        513
+      ],
+      "access": "write-only"
+    },
+    {
+      "address": 4110420026,
+      "width": 2,
+      "name": "f500_setup_083a_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        1027
+      ],
+      "access": "write-only"
+    },
+    {
+      "address": 4110420028,
+      "width": 2,
+      "name": "f500_setup_083c_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        1541
+      ],
+      "access": "write-only"
+    },
+    {
+      "address": 4110420030,
+      "width": 2,
+      "name": "f500_setup_083e_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        2055
+      ],
+      "access": "write-only"
+    },
+    {
+      "address": 4110420032,
+      "width": 2,
+      "name": "f500_setup_0840_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        9
+      ],
+      "access": "write-only"
+    },
+    {
+      "address": 4110420034,
+      "width": 2,
+      "name": "f500_setup_0842_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        7966
+      ],
+      "access": "write-only"
+    },
+    {
+      "address": 4110420140,
+      "width": 1,
+      "name": "prototype_setup_08ac_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        100
+      ]
+    },
+    {
+      "address": 4110420128,
+      "width": 1,
+      "name": "prototype_setup_08a0_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420129,
+      "width": 1,
+      "name": "prototype_setup_08a1_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420130,
+      "width": 1,
+      "name": "prototype_setup_08a2_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420131,
+      "width": 1,
+      "name": "prototype_setup_08a3_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420132,
+      "width": 1,
+      "name": "prototype_setup_08a4_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420133,
+      "width": 1,
+      "name": "prototype_setup_08a5_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420134,
+      "width": 1,
+      "name": "prototype_setup_08a6_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420135,
+      "width": 1,
+      "name": "prototype_setup_08a7_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420136,
+      "width": 1,
+      "name": "prototype_setup_08a8_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420137,
+      "width": 1,
+      "name": "prototype_setup_08a9_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420138,
+      "width": 1,
+      "name": "prototype_setup_08aa_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110420139,
+      "width": 1,
+      "name": "prototype_setup_08ab_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4244635688,
+      "width": 2,
+      "name": "usb_control_0028_write_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0,
+        8
+      ]
+    },
+    {
+      "address": 4244635672,
+      "width": 2,
+      "name": "usb_setup_0018_hypothesis",
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "access": "rw",
+      "allowed_writes": [
+        0,
+        4,
+        260,
+        261
+      ]
+    },
+    {
+      "address": 4244635652,
+      "width": 2,
+      "name": "usb_setup_0004_hypothesis",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0,
+        64,
+        16
+      ]
+    },
+    {
+      "address": 4244635696,
+      "width": 2,
+      "name": "usb_setup_0030_hypothesis",
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "access": "read-only"
+    },
+    {
+      "address": 4244635776,
+      "width": 2,
+      "name": "usb_endpoint_0080_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        12289
+      ]
+    },
+    {
+      "address": 4244635780,
+      "width": 2,
+      "name": "usb_endpoint_0084_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635844,
+      "width": 2,
+      "name": "usb_endpoint_00c4_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635784,
+      "width": 2,
+      "name": "usb_endpoint_0088_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635788,
+      "width": 2,
+      "name": "usb_endpoint_008c_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635792,
+      "width": 2,
+      "name": "usb_endpoint_0090_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635796,
+      "width": 2,
+      "name": "usb_endpoint_0094_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635800,
+      "width": 2,
+      "name": "usb_endpoint_0098_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635840,
+      "width": 2,
+      "name": "usb_endpoint_00c0_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635848,
+      "width": 2,
+      "name": "usb_endpoint_00c8_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635852,
+      "width": 2,
+      "name": "usb_endpoint_00cc_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635856,
+      "width": 2,
+      "name": "usb_endpoint_00d0_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635860,
+      "width": 2,
+      "name": "usb_endpoint_00d4_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635864,
+      "width": 2,
+      "name": "usb_endpoint_00d8_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635804,
+      "width": 2,
+      "name": "usb_endpoint_009c_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635808,
+      "width": 2,
+      "name": "usb_endpoint_00a0_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635812,
+      "width": 2,
+      "name": "usb_endpoint_00a4_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635816,
+      "width": 2,
+      "name": "usb_endpoint_00a8_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635820,
+      "width": 2,
+      "name": "usb_endpoint_00ac_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635824,
+      "width": 2,
+      "name": "usb_endpoint_00b0_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635828,
+      "width": 2,
+      "name": "usb_endpoint_00b4_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635832,
+      "width": 2,
+      "name": "usb_endpoint_00b8_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635836,
+      "width": 2,
+      "name": "usb_endpoint_00bc_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635868,
+      "width": 2,
+      "name": "usb_endpoint_00dc_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635872,
+      "width": 2,
+      "name": "usb_endpoint_00e0_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635876,
+      "width": 2,
+      "name": "usb_endpoint_00e4_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635880,
+      "width": 2,
+      "name": "usb_endpoint_00e8_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635884,
+      "width": 2,
+      "name": "usb_endpoint_00ec_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635888,
+      "width": 2,
+      "name": "usb_endpoint_00f0_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635892,
+      "width": 2,
+      "name": "usb_endpoint_00f4_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635896,
+      "width": 2,
+      "name": "usb_endpoint_00f8_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635900,
+      "width": 2,
+      "name": "usb_endpoint_00fc_setup_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        9
+      ]
+    },
+    {
+      "address": 4244635680,
+      "width": 2,
+      "name": "usb_port_status_ready_hypothesis",
+      "initial_value": 1,
+      "read_or_mask": 0,
+      "access": "read-only"
+    },
+    {
+      "address": 4244635660,
+      "width": 2,
+      "name": "usb_port_000c_command_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        128
+      ]
+    },
+    {
+      "address": 4110418432,
+      "width": 2,
+      "name": "f500_coefficient_control_latch",
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        8,
+        16
+      ],
+      "f500_lowbyte_alias": true
+    },
+    {
+      "address": 4110418434,
+      "width": 2,
+      "name": "f500_coefficient_control_0202_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418728,
+      "width": 2,
+      "name": "f500_coefficient_00_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418730,
+      "width": 2,
+      "name": "f500_coefficient_01_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418732,
+      "width": 2,
+      "name": "f500_coefficient_02_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418734,
+      "width": 2,
+      "name": "f500_coefficient_03_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418736,
+      "width": 2,
+      "name": "f500_coefficient_04_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        3
+      ]
+    },
+    {
+      "address": 4110418738,
+      "width": 2,
+      "name": "f500_coefficient_05_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        5
+      ]
+    },
+    {
+      "address": 4110418740,
+      "width": 2,
+      "name": "f500_coefficient_06_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        7
+      ]
+    },
+    {
+      "address": 4110418742,
+      "width": 2,
+      "name": "f500_coefficient_07_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        8
+      ]
+    },
+    {
+      "address": 4110418744,
+      "width": 2,
+      "name": "f500_coefficient_08_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        4
+      ]
+    },
+    {
+      "address": 4110418746,
+      "width": 2,
+      "name": "f500_coefficient_09_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        65530
+      ]
+    },
+    {
+      "address": 4110418748,
+      "width": 2,
+      "name": "f500_coefficient_10_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        65514
+      ]
+    },
+    {
+      "address": 4110418750,
+      "width": 2,
+      "name": "f500_coefficient_11_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        65493
+      ]
+    },
+    {
+      "address": 4110418752,
+      "width": 2,
+      "name": "f500_coefficient_12_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        65472
+      ]
+    },
+    {
+      "address": 4110418754,
+      "width": 2,
+      "name": "f500_coefficient_13_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        65460
+      ]
+    },
+    {
+      "address": 4110418756,
+      "width": 2,
+      "name": "f500_coefficient_14_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        65469
+      ]
+    },
+    {
+      "address": 4110418758,
+      "width": 2,
+      "name": "f500_coefficient_15_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        65512
+      ]
+    },
+    {
+      "address": 4110418760,
+      "width": 2,
+      "name": "f500_coefficient_16_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        61
+      ]
+    },
+    {
+      "address": 4110418762,
+      "width": 2,
+      "name": "f500_coefficient_17_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        191
+      ]
+    },
+    {
+      "address": 4110418764,
+      "width": 2,
+      "name": "f500_coefficient_18_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        356
+      ]
+    },
+    {
+      "address": 4110418766,
+      "width": 2,
+      "name": "f500_coefficient_19_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        535
+      ]
+    },
+    {
+      "address": 4110418768,
+      "width": 2,
+      "name": "f500_coefficient_20_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        688
+      ]
+    },
+    {
+      "address": 4110418770,
+      "width": 2,
+      "name": "f500_coefficient_21_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        767
+      ]
+    },
+    {
+      "address": 4110418772,
+      "width": 2,
+      "name": "f500_coefficient_22_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        717
+      ]
+    },
+    {
+      "address": 4110418774,
+      "width": 2,
+      "name": "f500_coefficient_23_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        487
+      ]
+    },
+    {
+      "address": 4110418776,
+      "width": 2,
+      "name": "f500_coefficient_24_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        45
+      ]
+    },
+    {
+      "address": 4110418778,
+      "width": 2,
+      "name": "f500_coefficient_25_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        64925
+      ]
+    },
+    {
+      "address": 4110418780,
+      "width": 2,
+      "name": "f500_coefficient_26_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        64093
+      ]
+    },
+    {
+      "address": 4110418782,
+      "width": 2,
+      "name": "f500_coefficient_27_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        63169
+      ]
+    },
+    {
+      "address": 4110418784,
+      "width": 2,
+      "name": "f500_coefficient_28_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        62282
+      ]
+    },
+    {
+      "address": 4110418786,
+      "width": 2,
+      "name": "f500_coefficient_29_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        61598
+      ]
+    },
+    {
+      "address": 4110418788,
+      "width": 2,
+      "name": "f500_coefficient_30_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        61299
+      ]
+    },
+    {
+      "address": 4110418790,
+      "width": 2,
+      "name": "f500_coefficient_31_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        61564
+      ]
+    },
+    {
+      "address": 4110418792,
+      "width": 2,
+      "name": "f500_coefficient_32_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        62536
+      ]
+    },
+    {
+      "address": 4110418794,
+      "width": 2,
+      "name": "f500_coefficient_33_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        64301
+      ]
+    },
+    {
+      "address": 4110418796,
+      "width": 2,
+      "name": "f500_coefficient_34_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1327
+      ]
+    },
+    {
+      "address": 4110418798,
+      "width": 2,
+      "name": "f500_coefficient_35_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        4595
+      ]
+    },
+    {
+      "address": 4110418800,
+      "width": 2,
+      "name": "f500_coefficient_36_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        8384
+      ]
+    },
+    {
+      "address": 4110418802,
+      "width": 2,
+      "name": "f500_coefficient_37_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        12427
+      ]
+    },
+    {
+      "address": 4110418804,
+      "width": 2,
+      "name": "f500_coefficient_38_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        16402
+      ]
+    },
+    {
+      "address": 4110418806,
+      "width": 2,
+      "name": "f500_coefficient_39_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        19961
+      ]
+    },
+    {
+      "address": 4110418808,
+      "width": 2,
+      "name": "f500_coefficient_40_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        22779
+      ]
+    },
+    {
+      "address": 4110418810,
+      "width": 2,
+      "name": "f500_coefficient_41_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        24588
+      ]
+    },
+    {
+      "address": 4110418812,
+      "width": 2,
+      "name": "f500_coefficient_42_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        25212
+      ]
+    },
+    {
+      "address": 4110420227,
+      "width": 1,
+      "name": "f500_setup_0903_command_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110417920,
+      "width": 2,
+      "name": "f500_base_control_guest_latch",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        1,
+        0,
+        2,
+        1792,
+        3840
+      ],
+      "f500_lowbyte_alias": true
+    },
+    {
+      "address": 4110418304,
+      "width": 2,
+      "name": "f500_calibration_00_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        10240
+      ]
+    },
+    {
+      "address": 4110418306,
+      "width": 2,
+      "name": "f500_calibration_01_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        6215
+      ]
+    },
+    {
+      "address": 4110418308,
+      "width": 2,
+      "name": "f500_calibration_02_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1550
+      ]
+    },
+    {
+      "address": 4110418310,
+      "width": 2,
+      "name": "f500_calibration_03_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        260
+      ]
+    },
+    {
+      "address": 4110418312,
+      "width": 2,
+      "name": "f500_calibration_04_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418314,
+      "width": 2,
+      "name": "f500_calibration_05_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418316,
+      "width": 2,
+      "name": "f500_calibration_06_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        15104
+      ]
+    },
+    {
+      "address": 4110418318,
+      "width": 2,
+      "name": "f500_calibration_07_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        7729
+      ]
+    },
+    {
+      "address": 4110418320,
+      "width": 2,
+      "name": "f500_calibration_08_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1548
+      ]
+    },
+    {
+      "address": 4110418322,
+      "width": 2,
+      "name": "f500_calibration_09_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        515
+      ]
+    },
+    {
+      "address": 4110418324,
+      "width": 2,
+      "name": "f500_calibration_10_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418326,
+      "width": 2,
+      "name": "f500_calibration_11_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418328,
+      "width": 2,
+      "name": "f500_calibration_12_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        20225
+      ]
+    },
+    {
+      "address": 4110418330,
+      "width": 2,
+      "name": "f500_calibration_13_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        8221
+      ]
+    },
+    {
+      "address": 4110418332,
+      "width": 2,
+      "name": "f500_calibration_14_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1547
+      ]
+    },
+    {
+      "address": 4110418334,
+      "width": 2,
+      "name": "f500_calibration_15_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        514
+      ]
+    },
+    {
+      "address": 4110418336,
+      "width": 2,
+      "name": "f500_calibration_16_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418338,
+      "width": 2,
+      "name": "f500_calibration_17_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418340,
+      "width": 2,
+      "name": "f500_calibration_18_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        24834
+      ]
+    },
+    {
+      "address": 4110418342,
+      "width": 2,
+      "name": "f500_calibration_19_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        7948
+      ]
+    },
+    {
+      "address": 4110418344,
+      "width": 2,
+      "name": "f500_calibration_20_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1290
+      ]
+    },
+    {
+      "address": 4110418346,
+      "width": 2,
+      "name": "f500_calibration_21_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        514
+      ]
+    },
+    {
+      "address": 4110418348,
+      "width": 2,
+      "name": "f500_calibration_22_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418350,
+      "width": 2,
+      "name": "f500_calibration_23_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418352,
+      "width": 2,
+      "name": "f500_calibration_24_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        27908
+      ]
+    },
+    {
+      "address": 4110418354,
+      "width": 2,
+      "name": "f500_calibration_25_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        7426
+      ]
+    },
+    {
+      "address": 4110418356,
+      "width": 2,
+      "name": "f500_calibration_26_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1034
+      ]
+    },
+    {
+      "address": 4110418358,
+      "width": 2,
+      "name": "f500_calibration_27_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        259
+      ]
+    },
+    {
+      "address": 4110418360,
+      "width": 2,
+      "name": "f500_calibration_28_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418362,
+      "width": 2,
+      "name": "f500_calibration_29_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418364,
+      "width": 2,
+      "name": "f500_calibration_30_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        28679
+      ]
+    },
+    {
+      "address": 4110418366,
+      "width": 2,
+      "name": "f500_calibration_31_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        6657
+      ]
+    },
+    {
+      "address": 4110418368,
+      "width": 2,
+      "name": "f500_calibration_32_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1032
+      ]
+    },
+    {
+      "address": 4110418370,
+      "width": 2,
+      "name": "f500_calibration_33_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        259
+      ]
+    },
+    {
+      "address": 4110418372,
+      "width": 2,
+      "name": "f500_calibration_34_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418374,
+      "width": 2,
+      "name": "f500_calibration_35_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418376,
+      "width": 2,
+      "name": "f500_calibration_36_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        26894
+      ]
+    },
+    {
+      "address": 4110418378,
+      "width": 2,
+      "name": "f500_calibration_37_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        5638
+      ]
+    },
+    {
+      "address": 4110418380,
+      "width": 2,
+      "name": "f500_calibration_38_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1031
+      ]
+    },
+    {
+      "address": 4110418382,
+      "width": 2,
+      "name": "f500_calibration_39_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        258
+      ]
+    },
+    {
+      "address": 4110418384,
+      "width": 2,
+      "name": "f500_calibration_40_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418386,
+      "width": 2,
+      "name": "f500_calibration_41_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418388,
+      "width": 2,
+      "name": "f500_calibration_42_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        23321
+      ]
+    },
+    {
+      "address": 4110418390,
+      "width": 2,
+      "name": "f500_calibration_43_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        4623
+      ]
+    },
+    {
+      "address": 4110418392,
+      "width": 2,
+      "name": "f500_calibration_44_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1030
+      ]
+    },
+    {
+      "address": 4110418394,
+      "width": 2,
+      "name": "f500_calibration_45_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        258
+      ]
+    },
+    {
+      "address": 4110418396,
+      "width": 2,
+      "name": "f500_calibration_46_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        1
+      ]
+    },
+    {
+      "address": 4110418398,
+      "width": 2,
+      "name": "f500_calibration_47_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110419326,
+      "width": 2,
+      "name": "f500_calibration_scalar_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        0
+      ]
+    },
+    {
+      "address": 4110418944,
+      "width": 2,
+      "name": "f500_setup_0400_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        257
+      ]
+    },
+    {
+      "address": 4110418946,
+      "width": 2,
+      "name": "f500_setup_0402_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        258
+      ]
+    },
+    {
+      "address": 4110418948,
+      "width": 2,
+      "name": "f500_setup_0404_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        258
+      ]
+    },
+    {
+      "address": 4110418950,
+      "width": 2,
+      "name": "f500_setup_0406_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        256
+      ]
+    },
+    {
+      "address": 4110418984,
+      "width": 2,
+      "name": "f500_setup_0428_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        257
+      ]
+    },
+    {
+      "address": 4110418986,
+      "width": 2,
+      "name": "f500_setup_042a_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        258
+      ]
+    },
+    {
+      "address": 4110418988,
+      "width": 2,
+      "name": "f500_setup_042c_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        258
+      ]
+    },
+    {
+      "address": 4110418990,
+      "width": 2,
+      "name": "f500_setup_042e_capture",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "access": "write-only",
+      "allowed_writes": [
+        256
+      ]
+    },
+    {
+      "address": 4177526836,
+      "width": 2,
+      "name": "pwm1_level_low8_latch",
+      "initial_value": null,
+      "read_or_mask": 0,
+      "allowed_writes": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        53,
+        54,
+        55,
+        56,
+        57,
+        58,
+        59,
+        60,
+        61,
+        62,
+        63,
+        64,
+        65,
+        66,
+        67,
+        68,
+        69,
+        70,
+        71,
+        72,
+        73,
+        74,
+        75,
+        76,
+        77,
+        78,
+        79,
+        80,
+        81,
+        82,
+        83,
+        84,
+        85,
+        86,
+        87,
+        88,
+        89,
+        90,
+        91,
+        92,
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99,
+        100,
+        101,
+        102,
+        103,
+        104,
+        105,
+        106,
+        107,
+        108,
+        109,
+        110,
+        111,
+        112,
+        113,
+        114,
+        115,
+        116,
+        117,
+        118,
+        119,
+        120,
+        121,
+        122,
+        123,
+        124,
+        125,
+        126,
+        127,
+        128,
+        129,
+        130,
+        131,
+        132,
+        133,
+        134,
+        135,
+        136,
+        137,
+        138,
+        139,
+        140,
+        141,
+        142,
+        143,
+        144,
+        145,
+        146,
+        147,
+        148,
+        149,
+        150,
+        151,
+        152,
+        153,
+        154,
+        155,
+        156,
+        157,
+        158,
+        159,
+        160,
+        161,
+        162,
+        163,
+        164,
+        165,
+        166,
+        167,
+        168,
+        169,
+        170,
+        171,
+        172,
+        173,
+        174,
+        175,
+        176,
+        177,
+        178,
+        179,
+        180,
+        181,
+        182,
+        183,
+        184,
+        185,
+        186,
+        187,
+        188,
+        189,
+        190,
+        191,
+        192,
+        193,
+        194,
+        195,
+        196,
+        197,
+        198,
+        199,
+        200,
+        201,
+        202,
+        203,
+        204,
+        205,
+        206,
+        207,
+        208,
+        209,
+        210,
+        211,
+        212,
+        213,
+        214,
+        215,
+        216,
+        217,
+        218,
+        219,
+        220,
+        221,
+        222,
+        223,
+        224,
+        225,
+        226,
+        227,
+        228,
+        229,
+        230,
+        231,
+        232,
+        233,
+        234,
+        235,
+        236,
+        237,
+        238,
+        239,
+        240,
+        241,
+        242,
+        243,
+        244,
+        245,
+        246,
+        247,
+        248,
+        249,
+        250,
+        251,
+        252,
+        253,
+        254,
+        255
+      ]
+    },
+    {
+      "address": 4211474448,
+      "width": 2,
+      "initial_value": 0,
+      "read_or_mask": 0,
+      "access": "read-only",
+      "name": "uart0-rts-static-low-input-hypothesis"
+    }
+  ]
+}

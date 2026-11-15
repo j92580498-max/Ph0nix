@@ -1,0 +1,33 @@
+[package]
+name = "featurephone-desktop"
+version = "1.0.0"
+edition = "2021"
+license = "GPL-2.0-or-later"
+description = "ph0nix native phone firmware emulator"
+publish = false
+
+[features]
+default = ["desktop"]
+desktop = ["dep:eframe", "dep:rfd", "dep:cpal"]
+
+[[bin]]
+name = "ph0nix"
+path = "src/main.rs"
+required-features = ["desktop"]
+
+[[bin]]
+name = "phone-cli"
+path = "src/phone_cli.rs"
+
+[dependencies]
+k750-native = { path = "../k750" }
+db2010-host = { path = "../db2010-host" }
+e830 = { package = "samsung-e830-emulator", path = "../../dependencies/samsung", default-features = false }
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+eframe = { version = "0.27", default-features = false, features = ["default_fonts", "glow", "x11", "wayland"], optional = true }
+rfd = { version = "0.14", default-features = false, features = ["gtk3"], optional = true }
+cpal = { version = "0.15", optional = true }
+
