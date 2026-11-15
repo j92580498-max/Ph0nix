@@ -107,13 +107,19 @@ jobs:
           msystem: UCRT64
           update: true
           install: >-
-            git make mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-rust
+            git make diffutils mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-rust
             mingw-w64-ucrt-x86_64-python mingw-w64-ucrt-x86_64-python-pip
             mingw-w64-ucrt-x86_64-ninja mingw-w64-ucrt-x86_64-cmake
             mingw-w64-ucrt-x86_64-pkgconf mingw-w64-ucrt-x86_64-glib2
             mingw-w64-ucrt-x86_64-gtk3 mingw-w64-ucrt-x86_64-zlib
             mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-libiconv
             mingw-w64-ucrt-x86_64-dtc
+      - name: Select UCRT64 Clang for Rust bindings
+        run: |
+          # bindgen searches system LLVM installations before PATH for its DLL.
+          # Use the same Clang installation for the DLL and builtin headers.
+          echo "LIBCLANG_PATH=$(cygpath -m /ucrt64/bin)" >> "$GITHUB_ENV"
+          echo "CLANG_PATH=$(cygpath -m /ucrt64/bin/clang.exe)" >> "$GITHUB_ENV"
       - name: Prepare authenticated DB2010 engine source
         run: |
           git config --global core.autocrlf false

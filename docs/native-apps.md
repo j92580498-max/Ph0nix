@@ -125,12 +125,18 @@ source checkout. Settings and sessions live under XDG data storage.
 
 ## Windows
 
-Use the **UCRT64** shell in MSYS2. Install GCC, Rust, Python/pip, Ninja, CMake,
-pkgconf, GLib, GTK 3, zlib, clang, libiconv, and DTC from the matching
+Use the **UCRT64** shell in MSYS2. Install `git`, `make`, and `diffutils` from
+MSYS2, plus GCC, Rust, Python/pip, Ninja, CMake, pkgconf, GLib, GTK 3, zlib,
+clang, libiconv, and DTC from the matching
 `mingw-w64-ucrt-x86_64-*` packages. The exact package list and build commands are in
 `.github/workflows/native-apps.yml`.
 
+Select UCRT64's Clang compiler and DLL together so Rust's bindgen uses matching
+builtin headers when other LLVM installations are present:
+
 ```sh
+export LIBCLANG_PATH="$(cygpath -m /ucrt64/bin)"
+export CLANG_PATH="$(cygpath -m /ucrt64/bin/clang.exe)"
 git config --global core.autocrlf false
 git config --global core.longpaths true
 git submodule update --init qemu
