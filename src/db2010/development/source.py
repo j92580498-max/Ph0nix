@@ -51,7 +51,9 @@ def verify_patches(root, lock):
     changed = set(git(source, 'diff', '--name-only', 'HEAD').splitlines())
     untracked = set(git(source, 'ls-files', '--others', '--exclude-standard').splitlines())
     if not changed <= allowed or not untracked <= allowed:
-        raise RuntimeError('QEMU has uncommitted changes outside the pinned patch series')
+        unexpected = sorted((changed | untracked) - allowed)
+        raise RuntimeError('QEMU has uncommitted changes outside the pinned patch series: ' +
+                           ', '.join(unexpected[:12]) + (' ...' if len(unexpected) > 12 else ''))
     for name, expected in expected_files.items():
         path = source/name
         if not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest() != expected:
@@ -70,7 +72,9 @@ def apply_patches(root, lock):
     changed = set(git(source, 'diff', '--name-only', 'HEAD').splitlines())
     untracked = set(git(source, 'ls-files', '--others', '--exclude-standard').splitlines())
     if not changed <= allowed or not untracked <= allowed:
-        raise RuntimeError('QEMU has uncommitted changes outside the pinned patch series')
+        unexpected = sorted((changed | untracked) - allowed)
+        raise RuntimeError('QEMU has uncommitted changes outside the pinned patch series: ' +
+                           ', '.join(unexpected[:12]) + (' ...' if len(unexpected) > 12 else ''))
     if records and all((source/name).is_file() and
                        hashlib.sha256((source/name).read_bytes()).hexdigest() == expected
                        for name, expected in expected_files.items()):

@@ -103,7 +103,7 @@ files, GTK 3 development files, libclang, and zlib. On Debian/Ubuntu:
 ```sh
 sudo apt-get install build-essential cmake ninja-build pkg-config \
   libglib2.0-dev libgtk-3-dev libclang-dev libxkbcommon-dev zlib1g-dev libasound2-dev
-git submodule update --init --recursive
+git submodule update --init qemu
 python3 frontends/build_desktop.py --jobs 2
 ```
 
@@ -133,7 +133,7 @@ pkgconf, GLib, GTK 3, zlib, clang, libiconv, and DTC from the matching
 ```sh
 git config --global core.autocrlf false
 git config --global core.longpaths true
-git submodule update --init --recursive
+git submodule update --init qemu
 python frontends/build_desktop.py --jobs 2
 ```
 

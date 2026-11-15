@@ -19,7 +19,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-linux-android
@@ -72,7 +72,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
       - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-python@v5
         with:
@@ -101,7 +101,7 @@ jobs:
           git config --global core.longpaths true
       - uses: actions/checkout@v4
         with:
-          submodules: recursive
+          submodules: true
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -115,7 +115,11 @@ jobs:
             mingw-w64-ucrt-x86_64-clang mingw-w64-ucrt-x86_64-libiconv
             mingw-w64-ucrt-x86_64-dtc
       - name: Prepare authenticated DB2010 engine source
-        run: PYTHONPATH=src python -m db2010.development.source init
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.symlinks false
+          git config --global core.longpaths true
+          PYTHONPATH=src python -m db2010.development.source init
       - run: cargo test --locked -p db2010-host -p k750-native -p featurephone-desktop
       - run: python frontends/build_desktop.py --jobs 2
       - run: python scripts/package_release.py dist/ph0nix-windows-x86_64 --platform windows --arch x86_64
