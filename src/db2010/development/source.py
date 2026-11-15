@@ -15,7 +15,10 @@ def git(root, *args):
 
 def tag_commit(source, tag):
     try:
-        return git(source, 'rev-parse', '--verify', '--quiet', f'refs/tags/{tag}^{{commit}}')
+        # Keep the reference literal across Windows/MSYS command launchers.
+        # rev-list also resolves annotated tags to their commit identity.
+        object_id = git(source, 'rev-parse', '--verify', '--quiet', f'refs/tags/{tag}')
+        return git(source, 'rev-list', '-n', '1', object_id)
     except subprocess.CalledProcessError as error:
         if error.returncode != 1:
             raise
