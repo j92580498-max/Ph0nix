@@ -79,6 +79,8 @@ jobs:
           python-version: '3.14'
       - run: sudo apt-get update && sudo apt-get install -y libglib2.0-dev libgtk-3-dev libclang-dev clang lld zlib1g-dev ninja-build pkg-config cmake libxkbcommon-dev libasound2-dev libfdt-dev
       - run: python3 -m pip install meson==1.11.1
+      - name: Prepare authenticated DB2010 engine source
+        run: PYTHONPATH=src python3 -m db2010.development.source init
       - run: cargo test --locked -p db2010-host -p k750-native -p featurephone-desktop
       - run: python3 frontends/build_desktop.py --jobs 2
       - run: python3 scripts/package_release.py dist/ph0nix-linux-x86_64 --platform linux --arch x86_64
@@ -112,6 +114,8 @@ jobs:
             mingw-w64-x86_64-gtk3 mingw-w64-x86_64-zlib
             mingw-w64-x86_64-clang mingw-w64-x86_64-libiconv
             mingw-w64-x86_64-dtc
+      - name: Prepare authenticated DB2010 engine source
+        run: PYTHONPATH=src python -m db2010.development.source init
       - run: cargo test --locked -p db2010-host -p k750-native -p featurephone-desktop
       - run: python frontends/build_desktop.py --jobs 2
       - run: python scripts/package_release.py dist/ph0nix-windows-x86_64 --platform windows --arch x86_64
