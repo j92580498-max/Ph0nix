@@ -125,8 +125,9 @@ source checkout. Settings and sessions live under XDG data storage.
 
 ## Windows
 
-Use the **UCRT64** shell in MSYS2. Install GCC, Rust, Python/pip, Ninja, CMake,
-pkgconf, GLib, GTK 3, zlib, clang, libiconv, and DTC from the matching
+Use the **UCRT64** shell in MSYS2. Install `git`, `make`, and `diffutils` from
+MSYS2, plus GCC, Rust, Python/pip, Ninja, CMake, pkgconf, GLib, GTK 3, zlib,
+clang, libiconv, and DTC from the matching
 `mingw-w64-ucrt-x86_64-*` packages. The exact package list and build commands are in
 `.github/workflows/native-apps.yml`.
 
