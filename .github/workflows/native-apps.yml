@@ -1,9 +1,15 @@
 name: Native applications
+permissions:
+  contents: read
+concurrency:
+  group: native-apps-${{ github.ref }}
+  cancel-in-progress: true
 env:
   UNICORN_NO_PKG_CONFIG: '1'
 on:
   workflow_dispatch:
   push:
+    branches: ['main']
     paths: ['native/**', 'frontends/**', 'assets/branding/**', 'Cargo.*', 'qemu', 'dependencies/**', 'src/db2010/development/source.py', '.github/workflows/native-apps.yml']
   pull_request:
     paths: ['native/**', 'frontends/**', 'assets/branding/**', 'Cargo.*', 'qemu', 'dependencies/**', 'src/db2010/development/source.py', '.github/workflows/native-apps.yml']

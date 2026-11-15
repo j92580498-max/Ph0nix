@@ -1,16 +1,15 @@
-# ph0nix phoenix
+# Ph0nix button-phone logo
 
-Original pixel artwork for the emulator's app branding. The phoenix has raised
-flame-shaped wings, a right-facing head and a flowing ember tail. Its five flat
-colors and transparent background work on both light and dark surfaces.
+Original pixel artwork on a 32 × 32 grid: a dark handset with a silver rim,
+green LCD, navigation pad and twelve physical buttons. The background is
+transparent and the colors are flat.
 
-- `phoenix.svg`: scalable mark with a 64 × 64 pixel grid.
-- `phoenix.png`: transparent 512 × 512 PNG, enlarged eight times without smoothing.
-- `phoenix-icon.png`: transparent 64 × 64 PNG for window icons and favicons.
-- `phoenix.pixels.json`: editable pixel grid and palette; `.` is transparent.
+- `logo.svg`: scalable pixel mark with crisp edges.
+- `logo.png`: transparent 512 × 512 PNG, enlarged without smoothing.
+- `logo-icon.png`: transparent 64 × 64 window icon and favicon.
+- `logo.pixels.json`: editable source grid and palette.
 
-After editing the grid, run `python3 scripts/generate_branding.py` from the
-project root. The script exports the canonical assets, browser copies and
-Android vector drawables together using only the Python standard library.
-Android launcher resources include legacy, adaptive and monochrome icons.
-The desktop embeds the icon and uses nearest-neighbor filtering in its header.
+Run `python3 scripts/generate_branding.py` to export the source artwork to the
+browser and Android vector resources. Adaptive launcher assets leave room for
+the icon mask; the monochrome version retains screen and keypad cutouts.
+Desktop textures use nearest-neighbor filtering.

@@ -1,0 +1,51 @@
+{
+  "name": "Ph0nix pixel-art button phone",
+  "description": "A simple dark button phone with a silver rim, green screen and twelve physical keys.",
+  "size": 32,
+  "palette": {
+    "S": "#9CAAAE",
+    "B": "#26343C",
+    "K": "#132127",
+    "L": "#ACDDC5",
+    "W": "#F1F7EF"
+  },
+  "monochrome_cutouts": [
+    "K",
+    "L",
+    "W"
+  ],
+  "pixels": [
+    "................................",
+    "..........SSSSSSSSSSSS..........",
+    "........SSSSSSSSSSSSSSSS........",
+    ".......SSBBBKKKKKKKKBBBSS.......",
+    ".......SBBBBBBBBBBBBBBBBS.......",
+    ".......SBKKKKKKKKKKKKKKBS.......",
+    ".......SBKWWWWWWWWWWWWKBS.......",
+    ".......SBKWLLLLLLLLLLLKBS.......",
+    ".......SBKWLLLLLLLLLLLKBS.......",
+    ".......SBKWLLLLLLLLLLLKBS.......",
+    ".......SBKLLLLLLLLLLLLKBS.......",
+    ".......SBKLLLLLLLLLLLLKBS.......",
+    ".......SBKLLLLLLLLLLLLKBS.......",
+    ".......SBKLLLLLLLLLLLLKBS.......",
+    ".......SBKLLLLLLLLLLLLKBS.......",
+    ".......SBKLLLLLLLLLLLLKBS.......",
+    ".......SBKLLLLLLLLLLLLKBS.......",
+    ".......SBKKKKKKSSKKKKKKBS.......",
+    ".......SBBBBBBSSSSBBBBBBS.......",
+    ".......SBWWWBBSKKSBBWWWBS.......",
+    ".......SBBBBBBSSSSBBBBBBS.......",
+    ".......SBBBBBBBSSBBBBBBBS.......",
+    ".......SBBWWWBBWWWBBWWWBS.......",
+    ".......SBBBBBBBBBBBBBBBBS.......",
+    ".......SBBWWWBBWWWBBWWWBS.......",
+    ".......SBBBBBBBBBBBBBBBBS.......",
+    ".......SBBWWWBBWWWBBWWWBS.......",
+    ".......SBBBBBBBBBBBBBBBBS.......",
+    ".......SSBWWWBBWWWBBWWWSS.......",
+    "........SSSSSSSSSSSSSSSS........",
+    "..........SSSSSSSSSSSS..........",
+    "................................"
+  ]
+}

@@ -2,7 +2,7 @@
 resolver = "2"
 members = ["native/k750", "native/db2010-host", "native/desktop", "frontends/android/native"]
 default-members = ["native/desktop"]
-exclude = ["dependencies/samsung"]
+exclude = ["dependencies/samsung", "dependencies/samsung-runtime"]
 
 [profile.dev]
 opt-level = 1

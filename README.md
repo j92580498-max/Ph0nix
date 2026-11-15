@@ -1,6 +1,6 @@
 # Ph0nix
 
-<img src="assets/branding/phoenix.svg" width="160" height="160" alt="ph0nix pixel-art phoenix">
+<img src="assets/branding/logo.svg" width="160" height="160" alt="Ph0nix pixel-art button phone">
 
 A native phone firmware emulator with a QEMU backend for the Sony Ericsson W800i and K750i. The K750i
 R1DB001 CID49 profile boots into the original phone interface and reaches all
@@ -102,6 +102,7 @@ diagnostics, traces, persistent state, GDB and testing, and
 The DB2010 research runner and original board port derive from
 [danylokos/db2010](https://github.com/danylokos/db2010). The native Samsung
 research backend derives from
-[tayga16/SamsungE380-Emu](https://github.com/tayga16/SamsungE380-Emu).
+SamsungE380-Emu. Its required, licensed backend source is included under
+[`dependencies/samsung-runtime`](dependencies/samsung-runtime).
 Component licenses and interface attribution are retained in the source and
 [third-party notices](frontends/android/THIRD_PARTY_NOTICES.md).

@@ -19,8 +19,8 @@ from ..execution.schedule import Schedule, PUBLICATION_INTERVAL
 UART_TAIL = 64 * 1024
 MAX_CLIENTS = 16
 ASSETS = {'/': ('index.html', 'text/html'), '/app.css': ('app.css', 'text/css'),
-          '/phoenix.svg': ('phoenix.svg', 'image/svg+xml'),
-          '/favicon.png': ('phoenix-icon.png', 'image/png'),
+          '/logo.svg': ('logo.svg', 'image/svg+xml'),
+          '/favicon.png': ('logo-icon.png', 'image/png'),
           '/app.js': ('app.js', 'text/javascript'),
           '/audio-client.js': ('audio-client.js', 'text/javascript'),
           '/audio-transport.js': ('audio-transport.js', 'text/javascript'),

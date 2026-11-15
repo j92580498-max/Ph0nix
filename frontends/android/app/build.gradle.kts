@@ -78,7 +78,7 @@ val buildE830Native by tasks.registering(Exec::class) {
         nativeProject.resolve("build.rs"),
     )
     inputs.dir(repositoryRoot.resolve("native"))
-    inputs.dir(repositoryRoot.resolve("dependencies/samsung/src"))
+    inputs.dir(repositoryRoot.resolve("dependencies/samsung-runtime/src"))
     inputs.dir(nativeProject.resolve("src"))
     inputs.files(engineSupport.resolve("build_native.py"), engineSupport.resolve("build_qemu.py"))
     inputs.file(rootProject.projectDir.resolve("build-support/cmake/android-arm64-v8a.toolchain.cmake"))

@@ -8,7 +8,7 @@ publish = false
 
 [dependencies]
 db2010-host = { path = "../db2010-host" }
-e830 = { package = "samsung-e830-emulator", path = "../../dependencies/samsung", default-features = false }
+e830 = { package = "samsung-e830-emulator", path = "../../dependencies/samsung-runtime", default-features = false }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

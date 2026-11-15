@@ -12,8 +12,8 @@
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
         android:background="@color/primary"
-        app:logo="@drawable/ic_phoenix"
-        app:logoDescription="@string/phoenix_logo_description"
+        app:logo="@drawable/ic_logo"
+        app:logoDescription="@string/logo_description"
         app:title="@string/library_title"
         app:titleTextColor="#FFFFFF"
         app:popupTheme="@style/ThemeOverlay.SamsungE830.AppBar" />
@@ -46,7 +46,7 @@
                 <ImageView
                     android:layout_width="64dp"
                     android:layout_height="64dp"
-                    android:src="@drawable/ic_phoenix"
+                    android:src="@drawable/ic_logo"
                     android:contentDescription="@null" />
                 <TextView
                     android:id="@+id/empty_title"
