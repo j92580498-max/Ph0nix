@@ -39,5 +39,5 @@ with native applications for Linux, Windows and Android.
 
 ## Sony Ericsson K750i interface
 
-![The five original K750i Settings tabs](docs/images/k750-native-settings.png)
+![The five original K750i Settings tabs](docs/images/VideoCapture_20261116-071627.jpg)
 
