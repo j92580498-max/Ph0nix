@@ -200,7 +200,8 @@ fn verify_pause(session: &mut Session) -> Result<()> {
     let frozen = session.progress()?;
     thread::sleep(Duration::from_millis(750));
     let later = session.progress()?;
-    for field in ["virtual_ns", "observations", "pc"] {
+    // The real-time engine does not expose an instruction counter.
+    for field in ["virtual_ns", "pc", "timer_ticks", "timer_irqs"] {
         ensure!(!frozen[field].is_null() && frozen[field] == later[field], "{field} changed while paused");
     }
     session.resume()?;
