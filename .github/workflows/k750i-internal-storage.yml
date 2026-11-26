@@ -38,6 +38,7 @@ jobs:
           trap 'rm -rf -- "$work"' EXIT
           python3 -m db2010.development.firmware init k750i --prefix --input-root "$work"
           firmware="$work/fw/k750i/images/R1DB001/cid49/sony-ericsson"
+          export PH0NIX_TEST_LCD_DIR="$PWD/build/k750i-test-lcd"
           if ! cargo run --locked -p db2010-host --example phone-files-resume -- \
             "$PWD/qemu/build/qemu-system-arm" --fresh "$work/phone" \
             "$firmware/K750_R1DB001_MAIN_EU_1_CL_RED49.mbn" \
@@ -59,3 +60,11 @@ jobs:
           PY
             exit 1
           fi
+      - name: Keep K750i boot screens on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k750i-test-lcd
+          path: build/k750i-test-lcd/*.ppm
+          if-no-files-found: ignore
+          retention-days: 3

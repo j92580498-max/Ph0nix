@@ -43,6 +43,20 @@ fn run(session: &mut Session, request: FileRequest) -> Result<FileJob> {
     }
 }
 
+fn capture_panel(session: &mut Session, name: &str) -> Result<()> {
+    let Some(directory) = std::env::var_os("PH0NIX_TEST_LCD_DIR") else {
+        return Ok(());
+    };
+    if let Some(frame) = session.frame()? {
+        let directory = PathBuf::from(directory);
+        fs::create_dir_all(&directory)?;
+        let mut ppm = format!("P6\n{} {}\n255\n", frame.width, frame.height).into_bytes();
+        ppm.extend(frame.rgb());
+        fs::write(directory.join(format!("{name}.ppm")), ppm)?;
+    }
+    Ok(())
+}
+
 fn wait_for_serial(session: &mut Session, workspace: &Path) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(300);
     loop {
@@ -60,7 +74,10 @@ fn wait_for_serial(session: &mut Session, workspace: &Path) -> Result<()> {
             }
             anyhow::bail!("Firmware stopped during cold boot: {}", session.summary()?);
         }
-        if progress["serial_input_ready"].as_bool() == Some(true)
+        // UART is available during early startup, before the phone's file
+        // service allows access. Give the first boot time to reach its UI.
+        if progress["virtual_ns"].as_u64().unwrap_or_default() >= 20_000_000_000
+            && progress["serial_input_ready"].as_bool() == Some(true)
             && progress["serial_cable_present"].as_bool() == Some(true)
         {
             return Ok(());
@@ -114,6 +131,7 @@ fn main() -> Result<()> {
         let mut session = Session::open(&engine, &state, checkpoint.as_deref())?;
         if checkpoint.is_none() {
             wait_for_serial(&mut session, &workspace)?;
+            capture_panel(&mut session, "initial-boot")?;
         }
         run(
             &mut session,
@@ -146,6 +164,7 @@ fn main() -> Result<()> {
         let mut session = Session::start(&options, &state)?;
         if cold_boot {
             wait_for_serial(&mut session, &workspace)?;
+            capture_panel(&mut session, "cold-boot")?;
         }
         run(
             &mut session,

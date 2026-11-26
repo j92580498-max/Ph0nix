@@ -242,7 +242,7 @@ impl<T: Read + Write> ObexClient<T> {
         data.extend(header(0x46, TARGET)?);
         let (status, response) = self.exchange(0x80, &data)?;
         if status != 0xa0 {
-            return Err(remote_error(status));
+            return Err(remote_error(status).context("OBEX CONNECT"));
         }
         ensure!(
             response.len() >= 4 && response[0] >> 4 == 1 && response[1] == 0,
@@ -278,7 +278,7 @@ impl<T: Read + Write> ObexClient<T> {
             request.extend(name_header(part)?);
             let (status, _) = self.exchange(0x85, &request)?;
             if status != 0xa0 {
-                return Err(remote_error(status));
+                return Err(remote_error(status).context(format!("OBEX SETPATH {part:?}")));
             }
         }
         Ok(())
@@ -297,7 +297,7 @@ impl<T: Read + Write> ObexClient<T> {
             request.append(&mut metadata);
             let (status, response) = self.exchange(0x83, &request)?;
             if status != 0x90 && status != 0xa0 {
-                return Err(remote_error(status));
+                return Err(remote_error(status).context("OBEX GET"));
             }
             let mut end = false;
             for (tag, value) in parse_headers(&response)? {
