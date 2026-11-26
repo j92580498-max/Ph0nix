@@ -107,6 +107,12 @@ impl Worker {
     }
 
     pub fn start_with_options(paths: impl Into<FirmwareSelection>, options: Option<HostOptions>) -> std::io::Result<Self> {
+        Self::start_in_workspace(paths, options, None)
+    }
+
+    pub fn start_in_workspace(paths: impl Into<FirmwareSelection>, options: Option<HostOptions>,
+        workspace: Option<std::path::PathBuf>,
+    ) -> std::io::Result<Self> {
         let paths = paths.into();
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
@@ -131,7 +137,10 @@ impl Worker {
                     anyhow::ensure!(paths.files.companions.keys().all(|key| key == "fs"),
                         "The native K750 profile accepts its audited MAIN and FS images; use the research runner for physical ROM/GDFS overrides.");
                     let fs = paths.files.companions.get("fs").ok_or_else(|| anyhow::anyhow!("Select the matching FS .fbn image."))?;
-                    let prepared = db2010_host::prepare::prepare_locked(&paths.files.image, fs, &options.data_dir)?;
+                    let prepared = match workspace {
+                        Some(directory) => db2010_host::prepare::prepare_locked_at(&paths.files.image, fs, &directory)?,
+                        None => db2010_host::prepare::prepare_locked(&paths.files.image, fs, &options.data_dir)?,
+                    };
                     let mut session = Session::start_prepared_with_services_and_diagnostics(&options, prepared,
                         worker_audio, worker_files.clone(), worker_diagnostics.clone())?;
                     let mut due = Instant::now();

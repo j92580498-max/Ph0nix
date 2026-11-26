@@ -52,7 +52,7 @@ fn new_string(env: &mut JNIEnv<'_>, value: &str) -> jstring {
         .unwrap_or(std::ptr::null_mut())
 }
 
-fn start_selection(selection: FirmwareSelection) -> Result<jlong, String> {
+fn start_selection(selection: FirmwareSelection, workspace: Option<PathBuf>) -> Result<jlong, String> {
     let registry = k750_native::registry();
     let name = registry
         .device(&selection.device)
@@ -60,7 +60,7 @@ fn start_selection(selection: FirmwareSelection) -> Result<jlong, String> {
         .info()
         .name;
     let options=HOST.get_or_init(||Mutex::new(None)).lock().map_err(|e|e.to_string())?.clone();
-    let worker = Worker::start_with_options(selection,options).map_err(|error| error.to_string())?;
+    let worker = Worker::start_in_workspace(selection, options, workspace).map_err(|error| error.to_string())?;
     Ok(Box::into_raw(Box::new(Mutex::new(Session {
         worker,
         frame: None,
@@ -121,25 +121,49 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeValidateSelectio
     new_string(&mut env, &result.err().unwrap_or_default())
 }
 
+fn memory_selection(selection: &FirmwareSelection) -> Result<&PathBuf, String> {
+    if selection.device != "k750i" {
+        return Err("This memory format is only supported for K750i.".into());
+    }
+    selection.files.companions.get("fs").ok_or_else(|| "Select the matching K750i FS.".into())
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCreateInternalMemory<'local>(
+    mut env: JNIEnv<'local>, _this: JObject<'local>, json: JString<'local>, workspace: JString<'local>,
+) -> jstring {
+    let result = (|| -> Result<(), String> {
+        let selection: FirmwareSelection = serde_json::from_str(&read_string(&mut env, &json)?)
+            .map_err(|error| error.to_string())?;
+        db2010_host::prepare::create_internal_memory(
+            &selection.files.image, memory_selection(&selection)?, &path(read_string(&mut env, &workspace)?),
+        ).map_err(|error| format!("{error:#}"))
+    })();
+    new_string(&mut env, &result.err().unwrap_or_default())
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeTransferInternalMemory<'local>(
     mut env: JNIEnv<'local>,
     _this: JObject<'local>,
     json: JString<'local>,
     data_directory: JString<'local>,
+    workspace: JString<'local>,
     file: JString<'local>,
     importing: jboolean,
 ) -> jstring {
     let result = (|| -> Result<(), String> {
         let selection: FirmwareSelection = serde_json::from_str(&read_string(&mut env, &json)?)
             .map_err(|error| error.to_string())?;
-        if selection.device != "k750i" {
-            return Err("This memory format is only supported for K750i.".into());
-        }
-        let fs = selection.files.companions.get("fs").ok_or("Select the matching K750i FS.")?;
-        let workspace = db2010_host::prepare::workspace(
-            &selection.files.image, fs, &path(read_string(&mut env, &data_directory)?),
-        ).map_err(|error| format!("{error:#}"))?;
+        let fs = memory_selection(&selection)?;
+        let workspace = read_string(&mut env, &workspace)?;
+        let workspace = if workspace.is_empty() {
+            db2010_host::prepare::workspace(
+                &selection.files.image, fs, &path(read_string(&mut env, &data_directory)?),
+            ).map_err(|error| format!("{error:#}"))?
+        } else {
+            path(workspace)
+        };
         let file = path(read_string(&mut env, &file)?);
         if importing != 0 {
             db2010_host::qmp::import_internal_memory(&workspace, &file)
@@ -155,11 +179,13 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStartSelection<'
     mut env: JNIEnv<'local>,
     _this: JObject<'local>,
     json: JString<'local>,
+    workspace: JString<'local>,
 ) -> jlong {
     let result = (|| -> Result<jlong, String> {
         let selection = serde_json::from_str(&read_string(&mut env, &json)?)
             .map_err(|error| error.to_string())?;
-        start_selection(selection)
+        let workspace = read_string(&mut env, &workspace)?;
+        start_selection(selection, (!workspace.is_empty()).then(|| path(workspace)))
     })();
     match result {
         Ok(handle) => handle,
@@ -308,7 +334,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStart<'local>(
             read_string(&mut env, &tfs)?,
             read_string(&mut env, &onenand)?,
         )?;
-        start_selection(paths.into())
+        start_selection(paths.into(), None)
     })();
     match result {
         Ok(handle) => handle,

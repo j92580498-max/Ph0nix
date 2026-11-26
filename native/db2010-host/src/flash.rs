@@ -168,15 +168,14 @@ pub(crate) fn unpack_memory(workspace: &Path, path: &Path) -> Result<FlashExport
     Ok(flash)
 }
 
-fn pack_memory(directory: &Path, output: &mut fs::File, generation: u128) -> Result<()> {
+fn pack_memory(output: &mut fs::File, generation: u128,
+    mut write_image: impl FnMut(&mut fs::File, &str, u64, u64) -> Result<[u8; 32]>,
+) -> Result<()> {
     use std::io::{Seek, SeekFrom};
     let mut header = MemoryHeader { generation, hashes: [[0; 32]; IMAGES.len()] };
     header.write(&mut *output)?;
-    for ((name, _, size), hash) in IMAGES.into_iter().zip(&mut header.hashes) {
-        let mut input = fs::File::open(directory.join(name))?;
-        ensure!(input.metadata()?.len() == size, "Invalid flash image size for {name}");
-        *hash = copy_image(&mut input, output, size)?;
-        verify_end(input)?;
+    for ((name, address, size), hash) in IMAGES.into_iter().zip(&mut header.hashes) {
+        *hash = write_image(output, name, address, size)?;
     }
     output.seek(SeekFrom::Start(0))?;
     header.write(output)
@@ -193,7 +192,24 @@ impl PendingMemory {
 
     pub(crate) fn pack(workspace: &Path, directory: &Path) -> Result<Self> {
         let (pending, mut output) = Self::create(workspace)?;
-        pack_memory(directory, &mut output, pending.generation)?;
+        pack_memory(&mut output, pending.generation, |output, name, _, size| {
+            let mut input = fs::File::open(directory.join(name))?;
+            ensure!(input.metadata()?.len() == size, "Invalid flash image size for {name}");
+            let hash = copy_image(&mut input, output, size)?;
+            verify_end(input)?;
+            Ok(hash)
+        })?;
+        output.sync_all()?;
+        Ok(pending)
+    }
+
+    pub(crate) fn seed(workspace: &Path, mut image: impl FnMut(&str, u64, u64) -> Result<Vec<u8>>) -> Result<Self> {
+        let (pending, mut output) = Self::create(workspace)?;
+        pack_memory(&mut output, pending.generation, |output, name, address, size| {
+            let bytes = image(name, address, size)?;
+            ensure!(bytes.len() as u64 == size, "Invalid initial flash image size for {name}");
+            copy_image(&mut bytes.as_slice(), output, size)
+        })?;
         output.sync_all()?;
         Ok(pending)
     }

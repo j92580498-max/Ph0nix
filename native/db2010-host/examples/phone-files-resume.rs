@@ -211,8 +211,19 @@ fn main() -> Result<()> {
         let main = PathBuf::from(args.next().context("K750i MAIN required")?);
         let fs_image = PathBuf::from(args.next().context("K750i FS required")?);
         ensure!(!data.exists(), "Fresh test requires a new data directory");
-        let state = prepare::prepare(&main, &fs_image, &data)?;
-        (state, None, true, Some((data, main, fs_image)))
+        fs::create_dir_all(&data)?;
+        let first = data.join("first-phone");
+        let second = data.join("second-phone");
+        prepare::create_internal_memory(&main, &fs_image, &first)?;
+        prepare::create_internal_memory(&main, &fs_image, &second)?;
+        assert_no_checkpoint(&first)?;
+        assert_no_checkpoint(&second)?;
+        let second_initial = memory_generation(&second)?;
+        ensure!(memory_generation(&first)? != second_initial, "New phones share a memory generation");
+        ensure!(prepare::create_internal_memory(&main, &fs_image, &first).is_err(),
+            "Creating a phone over an existing workspace succeeded");
+        let state = prepare::prepare_locked_at(&main, &fs_image, &first)?.state;
+        (state, None, true, Some((second, second_initial, main, fs_image)))
     } else {
         let checkpoint = PathBuf::from(args.next().context("Starting checkpoint required")?);
         let cold_boot = match args.next() {
@@ -273,14 +284,16 @@ fn main() -> Result<()> {
         }
         let backup = workspace.join("exported.k750mem");
         export_internal_memory(&workspace, &backup)?;
-        let restored = if let Some((data, main, fs_image)) = fresh {
-            let data = data.join("restored");
-            let target = prepare::workspace(&main, &fs_image, &data)?;
-            ensure!(!target.exists(), "Restore requires an empty phone workspace");
+        let restored = if let Some((target, initial, main, fs_image)) = fresh {
+            ensure!(memory_generation(&target)? == initial, "Saving the first phone changed the second phone");
+            let original = memory_generation(&workspace)?;
             import_internal_memory(&target, &backup)?;
-            let state = prepare::prepare(&main, &fs_image, &data)?;
+            ensure!(memory_generation(&target)? != initial, "Import did not replace the selected phone memory");
+            ensure!(memory_generation(&workspace)? == original, "Import changed the first phone");
+            let state = prepare::prepare_locked_at(&main, &fs_image, &target)?.state;
             ensure!(state.parent() == Some(target.as_path()), "Restore and boot chose different workspaces");
             assert_no_checkpoint(&target)?;
+            println!("{}", serde_json::json!({"separate_memory_files_for_identical_firmware":"passed"}));
             state
         } else {
             import_internal_memory(&workspace, &backup)?;

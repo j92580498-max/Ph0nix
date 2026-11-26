@@ -408,7 +408,7 @@ class MainActivity : AppCompatActivity() {
                         }
                         val failure = NativeBridge.nativeTransferInternalMemory(
                             entry.selectionJson(), File(filesDir, "sessions").absolutePath,
-                            staged.absolutePath, importing,
+                            entry.memoryWorkspace?.absolutePath.orEmpty(), staged.absolutePath, importing,
                         )
                         check(failure.isEmpty()) { failure }
                         if (!importing) {
@@ -439,7 +439,8 @@ class MainActivity : AppCompatActivity() {
         if (busy) return
         startActivity(
             Intent(this, EmulatorActivity::class.java)
-                .putExtra(EmulatorActivity.EXTRA_SELECTION, entry.selectionJson()),
+                .putExtra(EmulatorActivity.EXTRA_SELECTION, entry.selectionJson())
+                .putExtra(EmulatorActivity.EXTRA_MEMORY_WORKSPACE, entry.memoryWorkspace?.absolutePath),
         )
     }
 

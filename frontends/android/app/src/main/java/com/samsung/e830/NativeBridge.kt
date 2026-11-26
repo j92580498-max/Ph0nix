@@ -13,10 +13,11 @@ internal object NativeBridge {
     external fun nativeSetKeys(handle: Long, mask: Int)
     external fun nativeKeyBindings(device: String): String
     external fun nativeValidateSelection(selection: String): String
+    external fun nativeCreateInternalMemory(selection: String, workspace: String): String
     external fun nativeTransferInternalMemory(
-        selection: String, dataDirectory: String, file: String, importing: Boolean,
+        selection: String, dataDirectory: String, workspace: String, file: String, importing: Boolean,
     ): String
-    external fun nativeStartSelection(selection: String): Long
+    external fun nativeStartSelection(selection: String, workspace: String): Long
     external fun nativePollStatus(handle: Long): String
     external fun nativeTakeFrame(handle: Long): ByteArray?
     external fun nativeTakeAudio(handle: Long): ByteArray?

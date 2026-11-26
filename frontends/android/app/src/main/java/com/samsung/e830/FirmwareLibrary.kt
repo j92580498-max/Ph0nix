@@ -68,7 +68,12 @@ internal class FirmwareLibrary(context: Context) {
             }
             val display = image.second.substringBeforeLast('.', image.second).ifBlank { profile.name }.take(80)
             val staged = FirmwareEntry(id, display, staging, device, files)
-            val error = NativeBridge.nativeValidateSelection(staged.selectionJson())
+            val error = if (device == "k750i") {
+                // Publish the new machine and its initial flash together.
+                NativeBridge.nativeCreateInternalMemory(
+                    staged.selectionJson(), File(staging, FirmwareEntry.K750_MEMORY_DIRECTORY).absolutePath,
+                )
+            } else NativeBridge.nativeValidateSelection(staged.selectionJson())
             if (error.isNotBlank()) throw IllegalArgumentException(error)
             if (!staging.renameTo(destination)) throw IOException("Could not finish the firmware import.")
             val names = files.mapValues { it.value.name }

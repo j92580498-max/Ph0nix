@@ -307,7 +307,7 @@ class EmulatorActivity : AppCompatActivity() {
                     File(applicationInfo.nativeLibraryDir, "libdb2010_engine.so").absolutePath,
                     File(filesDir, "sessions").absolutePath, preferences.resume,
                 )
-                NativeBridge.nativeStartSelection(selection).also {
+                NativeBridge.nativeStartSelection(selection, intent.getStringExtra(EXTRA_MEMORY_WORKSPACE).orEmpty()).also {
                     check(it != 0L) { "Could not start the phone." }
                 }
             } catch (error: Throwable) {
@@ -844,6 +844,7 @@ class EmulatorActivity : AppCompatActivity() {
     private data class Binding(val label: String, val mask: Int)
     companion object {
         const val EXTRA_SELECTION = "com.samsung.e830.SELECTION"
+        const val EXTRA_MEMORY_WORKSPACE = "com.samsung.e830.MEMORY_WORKSPACE"
         private const val MENU_FILES = 1
         private const val MENU_BLUETOOTH = 2
         private const val MENU_CARDS = 3
