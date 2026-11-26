@@ -114,7 +114,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ndk',type=Path,required=True)
     parser.add_argument('--build',type=Path,default=ROOT/'build/android/qemu')
-    parser.add_argument('--clang',default=shutil.which('clang-19') or shutil.which('clang'))
+    parser.add_argument('--clang',default=os.environ.get('FEATUREPHONE_ANDROID_CLANG') or shutil.which('clang-19') or shutil.which('clang'))
     parser.add_argument('--jobs',type=int,default=2)
     parser.add_argument('--tools-only',action='store_true')
     args=parser.parse_args()

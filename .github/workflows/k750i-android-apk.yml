@@ -1,0 +1,73 @@
+name: K750i Android APK
+on:
+  push:
+    branches: [test/k750i-internal-storage]
+    paths:
+      - '.github/workflows/k750i-android-apk.yml'
+      - 'frontends/android/**'
+      - 'native/**'
+      - 'src/db2010/development/source.py'
+      - 'dependencies/**'
+      - 'Cargo.*'
+      - '.cargo/**'
+      - 'qemu'
+permissions:
+  contents: read
+concurrency:
+  group: k750i-android-apk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: src
+      UNICORN_NO_PKG_CONFIG: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platforms;android-35 build-tools;35.0.0 ndk;29.0.14206865'
+          log-accepted-android-sdk-licenses: false
+      - name: Prepare the build tools and pinned QEMU source
+        run: |
+          python3 -m db2010.development.source init
+          python3 -m venv build/android/host-tools
+          build/android/host-tools/bin/python -m pip install meson==1.11.1
+          echo "$GITHUB_WORKSPACE/build/android/host-tools/bin" >> "$GITHUB_PATH"
+          echo "FEATUREPHONE_PYTHON=$GITHUB_WORKSPACE/build/android/host-tools/bin/python" >> "$GITHUB_ENV"
+          ndk="$ANDROID_HOME/ndk/29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          # The official NDK includes an x64 Linux toolchain. CT100 needs no
+          # system package installation to get the Android cross compiler.
+          echo "FEATUREPHONE_ANDROID_CLANG=$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> "$GITHUB_ENV"
+      - name: Build and test the APK
+        working-directory: frontends/android
+        run: ./gradlew --no-daemon --console=plain assembleRelease lintRelease testDebugUnitTest
+      - name: Verify and package the APK
+        run: |
+          mkdir -p dist/k750i-android
+          apk=dist/k750i-android/ph0nix-k750i-arm64.apk
+          cp frontends/android/app/build/outputs/apk/release/app-release.apk "$apk"
+          python3 frontends/android/build-support/verify_apk.py "$apk" \
+            --ndk "$ANDROID_NDK_HOME" \
+            --aapt2 "$ANDROID_HOME/build-tools/35.0.0/aapt2" \
+            --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
+            --report dist/k750i-android/apk-verification.json
+          cp build/android/qemu/provenance.json dist/k750i-android/engine-provenance.json
+          cd dist/k750i-android
+          sha256sum ph0nix-k750i-arm64.apk > ph0nix-k750i-arm64.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ph0nix-k750i-arm64
+          path: dist/k750i-android/*
+          if-no-files-found: error

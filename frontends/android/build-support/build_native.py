@@ -12,7 +12,7 @@ from build_qemu import ROOT, setup_tools
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ndk', type=Path, required=True)
-    parser.add_argument('--clang', default=shutil.which('clang-19') or shutil.which('clang'))
+    parser.add_argument('--clang', default=os.environ.get('FEATUREPHONE_ANDROID_CLANG') or shutil.which('clang-19') or shutil.which('clang'))
     parser.add_argument('--jobs', type=int, default=2)
     args = parser.parse_args()
     build = ROOT / 'build/android/qemu'
