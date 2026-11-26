@@ -5,7 +5,7 @@ use db2010_host::{
     prepare,
     qmp::Session,
     storage::{FileJob, FileRequest},
-    HostOptions,
+    HostOptions, LcdFrame,
 };
 use std::{
     fs,
@@ -47,7 +47,17 @@ fn capture_panel(session: &mut Session, name: &str) -> Result<()> {
     let Some(directory) = std::env::var_os("PH0NIX_TEST_LCD_DIR") else {
         return Ok(());
     };
-    if let Some(frame) = session.frame()? {
+    // Read the cached panel even when the firmware has not redrawn it.
+    let panel = session.qmp.property("/machine", "display-cached")?;
+    if let Some(hex) = panel["pixels_hex"]
+        .as_str()
+        .filter(|hex| hex.len() == 176 * 220 * 4 && hex.is_ascii())
+    {
+        let rgb565_be = (0..hex.len())
+            .step_by(2)
+            .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
+            .collect::<Result<Vec<_>, _>>()?;
+        let frame = LcdFrame { width: 176, height: 220, rgb565_be, revision: 0 };
         let directory = PathBuf::from(directory);
         fs::create_dir_all(&directory)?;
         let mut ppm = format!("P6\n{} {}\n255\n", frame.width, frame.height).into_bytes();
@@ -57,42 +67,61 @@ fn capture_panel(session: &mut Session, name: &str) -> Result<()> {
     Ok(())
 }
 
-fn wait_for_serial(session: &mut Session, workspace: &Path, phase: &str) -> Result<()> {
-    let deadline = Instant::now() + Duration::from_secs(300);
-    let mut frames = [40, 60, 90].into_iter().peekable();
+fn report_boot_failure(session: &mut Session, workspace: &Path, phase: &str) {
+    if let Err(error) = capture_panel(session, &format!("{phase}-failure")) {
+        eprintln!("Could not capture the LCD at failure: {error:#}");
+    }
+    let snapshot = (|| -> Result<()> {
+        let progress = session.progress()?;
+        eprintln!("{phase} failure progress: {progress}");
+        if progress["running"].as_bool() == Some(true) {
+            session.qmp.execute("stop", serde_json::json!({}))?;
+        }
+        fs::write(
+            workspace.join("failure-snapshot-chunks.json"),
+            serde_json::to_vec(&session.snapshot_chunks()?)?,
+        )?;
+        Ok(())
+    })();
+    if let Err(error) = snapshot {
+        eprintln!("Could not capture the boot failure snapshot: {error:#}");
+    }
+}
+
+fn wait_for_serial(
+    session: &mut Session,
+    workspace: &Path,
+    phase: &str,
+    min_seconds: u64,
+) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(min_seconds * 3 + 30);
+    let mut frames = [40, 90, 150, min_seconds]
+        .into_iter()
+        .filter(|&t| t <= min_seconds)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .peekable();
     loop {
         let progress = session.progress()?;
         if progress["running"].as_bool() != Some(true) {
-            let snapshot = (|| -> Result<()> {
-                fs::write(
-                    workspace.join("failure-snapshot-chunks.json"),
-                    serde_json::to_vec(&session.snapshot_chunks()?)?,
-                )?;
-                Ok(())
-            })();
-            if let Err(error) = snapshot {
-                eprintln!("Could not capture the boot failure snapshot: {error:#}");
-            }
-            anyhow::bail!("Firmware stopped during cold boot: {}", session.summary()?);
+            report_boot_failure(session, workspace, phase);
+            anyhow::bail!("Firmware stopped during {phase}: {}", session.summary()?);
         }
         let seconds = progress["virtual_ns"].as_u64().context("Guest clock missing")? / 1_000_000_000;
-        if let Some(&capture_at) = frames.peek() {
-            if seconds >= capture_at {
-                capture_panel(session, &format!("{phase}-{capture_at}s"))?;
-                frames.next();
-            }
+        while let Some(&capture_at) = frames.peek() {
+            if seconds < capture_at { break; }
+            capture_panel(session, &format!("{phase}-{capture_at}s"))?;
+            frames.next();
         }
-        // At 20 seconds the original firmware still displayed Please wait
-        // and rejected OBEX CONNECT, although the UART was ready.
-        if seconds >= 90 && progress["serial_input_ready"].as_bool() == Some(true)
+        if seconds >= min_seconds && progress["serial_input_ready"].as_bool() == Some(true)
             && progress["serial_cable_present"].as_bool() == Some(true)
         {
             return Ok(());
         }
-        ensure!(
-            Instant::now() < deadline,
-            "Phone file transport did not become ready after cold boot: {progress}"
-        );
+        if Instant::now() >= deadline {
+            report_boot_failure(session, workspace, phase);
+            anyhow::bail!("Phone file transport did not become ready during {phase}");
+        }
         thread::sleep(Duration::from_millis(200));
     }
 }
@@ -137,14 +166,17 @@ fn main() -> Result<()> {
         println!("{}", serde_json::json!({"phase":"initial_boot","state":state}));
         let mut session = Session::open(&engine, &state, checkpoint.as_deref())?;
         if checkpoint.is_none() {
-            wait_for_serial(&mut session, &workspace, "initial-boot")?;
+            wait_for_serial(&mut session, &workspace, "initial-boot", 240)?;
         }
-        run(
+        if let Err(error) = run(
             &mut session,
             FileRequest::List {
                 path: directory.clone(),
             },
-        )?;
+        ) {
+            report_boot_failure(&mut session, &workspace, "initial-boot");
+            return Err(error);
+        }
         run(
             &mut session,
             FileRequest::Import {
@@ -169,14 +201,17 @@ fn main() -> Result<()> {
         };
         let mut session = Session::start(&options, &state)?;
         if cold_boot {
-            wait_for_serial(&mut session, &workspace, "cold-boot")?;
+            wait_for_serial(&mut session, &workspace, "cold-boot", 90)?;
         }
-        run(
+        if let Err(error) = run(
             &mut session,
             FileRequest::List {
                 path: directory.clone(),
             },
-        )?;
+        ) {
+            report_boot_failure(&mut session, &workspace, "cold-boot");
+            return Err(error);
+        }
         ensure!(
             session
                 .files

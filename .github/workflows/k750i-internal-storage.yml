@@ -54,9 +54,13 @@ jobs:
               chunks = json.loads(path.read_text())
               snapshot = json.loads(b''.join(base64.b64decode(chunk['data_base64']) for chunk in chunks))
               print('Firmware registers:', json.dumps(snapshot.get('registers')))
+              for key in ('stop', 'synthetic_etx', 'serial_transport', 'uart_bytes'):
+                  print(f'{key}:', json.dumps(snapshot.get(key)))
+              nor = snapshot.get('nor', {})
+              print('NOR:', json.dumps({key: nor.get(key) for key in ('commands', 'operations', 'partitions')}))
               i2c = snapshot.get('i2c', {})
               i2c['captured_writes'] = i2c.get('captured_writes', [])[-8:]
-              print('I2C at firmware stop:', json.dumps(i2c))
+              print('I2C at failure:', json.dumps(i2c))
           PY
             exit 1
           fi
