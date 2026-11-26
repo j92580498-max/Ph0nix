@@ -18,6 +18,8 @@ jobs:
           persist-credentials: false
       - name: Set up stable Rust
         uses: dtolnay/rust-toolchain@stable
+      - name: Prepare the pinned DB2010 source
+        run: python3 -m db2010.development.source init
       - name: Test the Rust host
         run: cargo test --locked -p db2010-host -p k750-native
       - name: Build the pinned DB2010 engine
@@ -26,8 +28,7 @@ jobs:
           tools="$PWD/build/k750i-test-tools/bin"
           "$tools/python" -m pip install meson==1.11.1
           export PATH="$tools:$PATH"
-          python -m db2010.development.source init
-          if ! python -m db2010.development.build --configure --jobs 2; then
+          if ! "$tools/python" -m db2010.development.build --configure --jobs 2; then
             find build/provenance/qemu -type f -name build.log -exec tail -n 80 {} \; || true
             exit 1
           fi
