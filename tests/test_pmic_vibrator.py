@@ -6,6 +6,7 @@ import pytest
 from support.component_test import ROOT, component_inputs
 from support.fixtures import qemu_run, freeze_state, words
 from support.i2c_interleave_fixtures import state, write, read
+from support.storage_fixtures import storage_state
 
 
 def test_vibrator_control_fields_and_state_are_independent_of_retained_history(tmp_path):
@@ -101,8 +102,6 @@ def test_native_vibrator_readback_requires_explicit_contract(tmp_path):
 
 
 def test_pmic_fault_preserves_committed_internal_storage(tmp_path, monkeypatch):
-    from test_flash import storage_state
-
     spec = configured(write(0xa0, 0x2a) + write(0xa0, 0x2e))
     # Prefix the I2C program with a NOR program command and its data word.
     # The literal loads in both programs are PC-relative.

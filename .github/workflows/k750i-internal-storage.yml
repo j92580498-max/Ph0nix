@@ -23,7 +23,13 @@ jobs:
       - name: Set up stable Rust
         uses: dtolnay/rust-toolchain@stable
       - name: Prepare the pinned DB2010 source
-        run: python3 -m db2010.development.source init
+        run: |
+          # Self-hosted checkout can reuse the submodule from a prior job.
+          # Start from the pin when the prepared sources no longer match it.
+          if ! python3 -m db2010.development.source check; then
+            git submodule deinit -f -- qemu
+            python3 -m db2010.development.source init
+          fi
       - name: Test the Rust host
         run: cargo test --locked -p db2010-host -p k750-native
       - name: Build the pinned DB2010 engine
