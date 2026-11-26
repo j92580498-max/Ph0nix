@@ -28,15 +28,27 @@ fn require_running(session: &mut Session) -> Result<()> {
     Ok(())
 }
 
-fn boot(engine: &Path, state: &Path, first: bool) -> Result<Session> {
+fn boot(engine: &Path, state: &Path, card: &CardImage, first: bool) -> Result<Session> {
     println!("Starting {} K750i boot", if first { "first" } else { "cold" });
-    let mut session = Session::open(engine, state, None)?;
+    let mut session = Session::open_with_memory_stick(engine, state, card.path())?;
+    let lock_error = card.info().expect_err("Host opened the image while the engine held it");
+    ensure!(lock_error.to_string().contains("in use"), "Unexpected image error: {lock_error:#}");
+    let mut last = Value::Null;
+    let mut next_log = Instant::now();
     let seconds = if first { 240 } else { 150 };
     let deadline = Instant::now() + Duration::from_secs(seconds * 3 + 30);
     loop {
         let progress = session.progress()?;
         if progress["running"] != true {
             require_running(&mut session)?;
+        }
+        if Instant::now() >= next_log {
+            let status = probe(&mut session)?;
+            if status != last {
+                println!("Card at boot ({} ns): {status}", progress["virtual_ns"]);
+                last = status;
+            }
+            next_log = Instant::now() + Duration::from_secs(1);
         }
         if progress["virtual_ns"].as_u64().unwrap_or(0) >= seconds * 1_000_000_000
             && progress["serial_input_ready"] == true
@@ -56,6 +68,16 @@ fn boot(engine: &Path, state: &Path, first: bool) -> Result<Session> {
             thread::sleep(Duration::from_secs(3));
         }
     }
+    let status = probe(&mut session)?;
+    if !(status["attribute_sectors_read"].as_u64().unwrap_or(0) >= 2
+        && status["sectors_read"].as_u64().unwrap_or(0) > 0)
+    {
+        log_detect_state(&mut session, "After boot");
+        bail!("K750i failed to read the card during boot: {status}");
+    }
+    ensure!(status["card_present"] == true && status["detect_irqs"] == 0,
+        "Unexpected card detect status: {status}");
+    println!("K750i read Memory Stick sectors at boot: {status}");
     Ok(session)
 }
 
@@ -69,41 +91,6 @@ fn log_detect_state(session: &mut Session, phase: &str) {
             Ok(value) => println!("{phase} {field}: {}", value.as_str().unwrap_or_default().trim()),
             Err(error) => println!("{phase} {field}: {error:#}"),
         }
-    }
-}
-
-fn insert(session: &mut Session, card: &CardImage) -> Result<()> {
-    let before = probe(session)?;
-    ensure!(before["card_present"] == false && before["detect_irqs"] == 0, "Slot not empty: {before}");
-    println!("Empty slot: {before}");
-    log_detect_state(session, "Before insertion");
-    session.insert_memory_stick(card.path())?;
-    let lock_error = card.info().expect_err("Host opened the image while the engine held it");
-    ensure!(lock_error.to_string().contains("in use"), "Unexpected image error: {lock_error:#}");
-    let deadline = Instant::now() + Duration::from_secs(40);
-    let mut last = Value::Null;
-    let mut next_log = Instant::now();
-    loop {
-        require_running(session)?;
-        let status = probe(session)?;
-        if status != last && Instant::now() >= next_log {
-            println!("Insertion: {status}");
-            next_log = Instant::now() + Duration::from_secs(1);
-            last = status.clone();
-        }
-        if status["attribute_sectors_read"].as_u64().unwrap_or(0) >= 2
-            && status["sectors_read"].as_u64().unwrap_or(0) > 0
-        {
-            ensure!(status["card_present"] == true && status["detect_irqs"] == 1,
-                "Unexpected card detect status: {status}");
-            println!("K750i read sectors from the inserted card: {status}");
-            return Ok(());
-        }
-        if Instant::now() >= deadline {
-            log_detect_state(session, "After insertion");
-            bail!("K750i failed to read the card: {status}");
-        }
-        thread::sleep(Duration::from_millis(50));
     }
 }
 
@@ -181,8 +168,7 @@ fn main() -> Result<()> {
     let write_host = workspace.join("write-input.txt");
     fs::write(&write_host, &written)?;
 
-    let mut session = boot(&engine, &state, true)?;
-    insert(&mut session, &card)?;
+    let mut session = boot(&engine, &state, &card, true)?;
     let folder = find_card_folder(&mut session)?;
     export(&mut session, [folder.clone(), vec![SEED.into()]].concat(), workspace.join("readback.txt"), &seed)?;
     let path = [folder.clone(), vec![WRITTEN.into()]].concat();
@@ -199,8 +185,7 @@ fn main() -> Result<()> {
     card.export_file(&[other, vec![WRITTEN.into()]].concat(), &raw_readback, false)?;
     ensure!(fs::read(raw_readback)? == written, "Firmware write did not persist in the card image");
     ensure!(!workspace.join("phone.saved.json").exists(), "Unexpected checkpoint in a cold-boot test");
-    let mut session = boot(&engine, &state, false)?;
-    insert(&mut session, &card)?;
+    let mut session = boot(&engine, &state, &card, false)?;
     export(&mut session, path, workspace.join("cold-readback.txt"), &written)?;
     println!("Memory Stick read, write and cold-boot persistence passed");
     Ok(())

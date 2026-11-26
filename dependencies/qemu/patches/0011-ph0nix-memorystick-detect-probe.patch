@@ -592,7 +592,7 @@ index 8691239f9249a0a97785fb2b2bba35a3415fa67e..f1c5cee1399462b04db2a70b0906f27c
          qdict_put_int(slot, "detect_mask", 4);
          qdict_put_bool(slot, "direction_sensitive", true);
 diff --git a/hw/arm/db2010-register-bank.c b/hw/arm/db2010-register-bank.c
-index 447c5d3e0431a6e7b2f549300fc33b59cf4ffbdb..f3dfbb2a5b9e3234d8a8c00ff89b4bb5b13e2fa7 100644
+index 447c5d3e0431a6e7b2f549300fc33b59cf4ffbdb..084464f879ece8316494abc060f977594c95c14a 100644
 --- a/hw/arm/db2010-register-bank.c
 +++ b/hw/arm/db2010-register-bank.c
 @@ -5,6 +5,50 @@
@@ -707,19 +707,27 @@ index 447c5d3e0431a6e7b2f549300fc33b59cf4ffbdb..f3dfbb2a5b9e3234d8a8c00ff89b4bb5
      return fault;
  }
  
-@@ -145,6 +220,12 @@ DB2010Register *dbreg_find(DB2010RegisterBank *bank, uint32_t address)
+@@ -145,11 +220,20 @@ DB2010Register *dbreg_find(DB2010RegisterBank *bank, uint32_t address)
  void dbreg_reset(DB2010RegisterBank *s)
  {
      s->f500_commands = 0;
-+    dbms_close(&s->memorystick);
 +    s->memorystick_probe = false;
-+    s->memorystick_present = false;
++    s->memorystick_present = s->memorystick.image != NULL;
 +    s->memorystick_detect_pending = false;
 +    s->memorystick_probe_accesses = 0;
 +    s->memorystick_probe_command = 0;
      for (unsigned i = 0; i < s->registers->len; i++) {
          DB2010Register *r = g_ptr_array_index(s->registers, i);
          r->value = r->initial;
+         r->known_mask = r->initial_known ? UINT32_MAX >> (8 * (4 - r->width)) : 0;
+     }
++    if (s->memorystick_present) {
++        dbms_reset(&s->memorystick, dbreg_find(s, DBMS_BASE + 8)->value,
++                   dbreg_find(s, DBMS_BASE + 0x10)->value);
++    }
+ }
+ 
+ void dbreg_export(DB2010RegisterBank *model, QDict *snapshot)
 diff --git a/hw/arm/db2010-timer.c b/hw/arm/db2010-timer.c
 index 671b49eae2aadff7dc3db6b8dac17f8c236e70bd..b8a6659824e146cbc6e3620c92d131e000e84ed2 100644
 --- a/hw/arm/db2010-timer.c
@@ -893,10 +901,10 @@ index e0ead0f2b190ec06530df303eeddd7599b348d22..34c5b91bf9f4d4d692212ce08049ab68
  typedef struct DB2010IrqInput {
      DB2010Timer *timer;
 diff --git a/hw/arm/db2010.c b/hw/arm/db2010.c
-index b3cd603ba3823db48f2e4b216115b2f498d807d9..5f582d99f1c993d03aed31bee739f1e9bea70f5e 100644
+index b3cd603ba3823db48f2e4b216115b2f498d807d9..a7cc42b2f127f01eaabe800926272e8cdeafe1e1 100644
 --- a/hw/arm/db2010.c
 +++ b/hw/arm/db2010.c
-@@ -80,6 +80,83 @@ static void set_research_guards(Object *obj, bool enabled, Error **errp)
+@@ -80,6 +80,88 @@ static void set_research_guards(Object *obj, bool enabled, Error **errp)
      s->research_guards = enabled;
  }
  
@@ -939,7 +947,12 @@ index b3cd603ba3823db48f2e4b216115b2f498d807d9..5f582d99f1c993d03aed31bee739f1e9
 +        return;
 +    }
 +    dbms_reset(ms, control->value, enable->value);
-+    dbreg_memorystick_probe(s->bank, true);
++    if (runstate_check(RUN_STATE_PRELAUNCH)) {
++        /* A card already in the slot is sampled as an input level at boot. */
++        s->bank->memorystick_present = true;
++    } else {
++        dbreg_memorystick_probe(s->bank, true);
++    }
 +}
 +
 +static char *get_memorystick_probe_status(Object *obj, Error **errp)
@@ -980,7 +993,7 @@ index b3cd603ba3823db48f2e4b216115b2f498d807d9..5f582d99f1c993d03aed31bee739f1e9
  static void db2010_class_init(ObjectClass *oc, const void *data)
  {
      MachineClass *mc = MACHINE_CLASS(oc);
-@@ -95,6 +172,11 @@ static void db2010_class_init(ObjectClass *oc, const void *data)
+@@ -95,6 +177,11 @@ static void db2010_class_init(ObjectClass *oc, const void *data)
      object_class_property_add_bool(oc, "research-guards", get_research_guards,
                                      set_research_guards);
      object_class_property_add_str(oc, "state", get_state, set_state);
