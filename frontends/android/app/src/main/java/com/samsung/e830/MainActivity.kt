@@ -232,8 +232,8 @@ class MainActivity : AppCompatActivity() {
         content.addView(settingSwitch("Open phone in fullscreen", preferences.fullscreen) { preferences.fullscreen = it })
         content.addView(settingSwitch("Keep screen awake while running", preferences.keepAwake) { preferences.keepAwake = it })
         content.addView(infoText("Phone state", true))
-        content.addView(settingSwitch("Save and resume K750i", preferences.resume) { preferences.resume = it })
-        content.addView(infoText("When enabled, K750i continues from its saved phone state and files. Disabling it boots the original firmware state; enable it again to restore saved phone files. First boot can take several minutes."))
+        content.addView(settingSwitch("Resume saved K750i session", preferences.resume) { preferences.resume = it })
+        content.addView(infoText("When enabled, K750i continues from its saved session. Disabling it cold boots with saved internal storage and settings. Internal storage is saved when the phone stops. First boot can take several minutes."))
         content.addView(infoText("Presentation targets 60 FPS. Firmware LCD updates and emulation speed depend on the phone and your device."))
     }
 

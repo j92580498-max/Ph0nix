@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Native hosts share preparation, QMP, complete LCD frames and keypad contacts.
 pub mod prepare;
+mod flash;
 pub mod qmp;
 pub mod audio;
 pub mod bluetooth;

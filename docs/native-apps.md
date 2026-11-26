@@ -42,8 +42,8 @@ contains several revisions; this profile accepts only the pinned R1DB001 CID49
 pair. Import validates complete containers and their sparse payload records.
 
 **Settings** controls sound, the FPS overlay, fullscreen, keeping the display awake,
-and saving/resuming K750i. Leaving the phone saves in a background worker when
-resume is enabled. Disabling resume boots from reset. Key contacts release on
+and whether K750i resumes its previous session. Leaving the phone saves its
+internal storage in a background worker. Key contacts release on
 focus loss or backgrounding. Android storage access uses document selection
 and private copies. The Internet permission is used for loopback QMP; no web
 application is started.
@@ -51,10 +51,10 @@ application is started.
 Desktop Settings keeps a draft until **Save**. **Cancel** or switching tabs
 discards the draft and restores any unsaved fullscreen preview.
 
-Saved files belong to the saved phone state. Disabling resume starts from the
-original prepared firmware state; re-enabling it loads the saved state and its
-files. Imported moves wait for a durable saved checkpoint before deleting the
-host source. A failed checkpoint or changed source keeps the original.
+Disabling resume boots the firmware from reset with the saved internal storage
+and settings. Enabling resume continues the saved session. Imported moves wait
+for a durable save before deleting the host source. A failed save or changed
+source keeps the original. See [storage](storage.md) for the save format.
 
 ## Developer mode and transfers
 

@@ -2,6 +2,25 @@
 
 The native file browser uses the running K750 firmware's PC Suite AT/OBEX service over UART0. It does not edit mounted NOR bytes on the host. The root directory is `Phone memory`, with `Other`, `Pictures`, `Sounds`, `Themes` and `Videos` provided by the firmware.
 
+Native K750 sessions now save committed internal storage on a normal stop, including when resume is disabled. `Session.save()` exports MAIN, FS, GDFS, NAND main and NAND spare into a new `phone-flash-*` directory. Image sizes and SHA-256 hashes are recorded in `phone.saved.json` alongside the VM checkpoint. Files are flushed before that metadata is atomically replaced; an export or checkpoint failure retains the previous published generation. The previous generation is removed only after a successful save. Forced termination does not trigger this normal-stop save.
+
+A cold boot (resume disabled) verifies these images and loads them with fresh flash controllers. The engine exports unknown bytes as erased `0xFF`. Restoring a VM checkpoint uses its own storage and device state. The original audited MAIN/FS containers and private compatibility inputs remain the preparation source; saved flash is applied to the launch state. GDFS supplies K750 nonvolatile settings. Old checkpoint metadata without flash remains readable and receives a storage generation on its next successful save. The new native cold-boot path still needs a firmware round-trip check; existing engine raw-flash tests cover byte export/import, not this native workflow.
+
+On a runner with a built DB2010 engine and a disposable copied firmware workspace, `cargo run --locked -p db2010-host --example phone-files-resume -- ENGINE COPIED_STATE CHECKPOINT cold-boot` checks import, save, cold boot, list and byte-for-byte export. Omitting `cold-boot` keeps the existing VM-resume regression. The example writes a test file into the copied phone and saves its deletion after verification.
+
+The `K750i internal storage` GitHub Actions workflow runs on pushes to
+`test/k750i-internal-storage`. It uses the `self-hosted` and `Linux` runner labels;
+add the container's custom label under `runs-on` if the repository has several
+Linux runners. The container needs a current stable Rust toolchain, Python 3
+with `venv`, and these build packages (Debian/Ubuntu names): `build-essential`, `cmake`, `ninja-build`,
+`pkg-config`, `python3-venv`, `clang`, `libclang-dev`, `libglib2.0-dev`,
+`libpixman-1-dev`, `libfdt-dev` and `zlib1g-dev`. It builds the pinned engine,
+fetches the authenticated MAIN/FS, and runs the example with
+`--fresh NEW_DATA_DIR MAIN FS` in a temporary directory. Success prints
+`{"save_cold_boot_roundtrip":"passed"}`. If the initial guest setup prevents the
+file service from accepting commands, finish setup and use the copied checkpoint
+form above to start from a known working handset state.
+
 `PhoneFiles` queues one operation on a dedicated thread; the presentation and CPU threads continue while files move. Import, export, copy, move, folder creation and deletion use native OBEX requests. File transfers stream through 32 KiB buffers and have a 32 MiB size limit. A move verifies the destination's byte count and SHA-256. An imported move also waits for a healthy, durable VM checkpoint before removing the host source or reporting completion. Existing destinations require an explicit replacement request. Folder deletion requires an empty folder; recursive directory transfer is not implemented.
 
 Before saving a native checkpoint, `Session.save()` calls a bounded file-service barrier while the firmware is still running. The barrier rejects new jobs, waits for an accepted job to finish, and sends OBEX DISCONNECT. A timeout or failed stream preserves the previous saved state. This prevents restoring a firmware session still expecting binary OBEX packets while the new host starts an ASCII AT handshake. The production firmware import/save/restore/list/export regression is recorded in `build/ph0nix-files-resume-after/run.log`; the equivalent check without this barrier failed with a receive timeout.

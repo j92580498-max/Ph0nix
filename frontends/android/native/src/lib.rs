@@ -312,7 +312,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativePollStatus<'loca
             Ok(WorkerEvent::Status(status)) => if !session.finished {session.status=status;},
             Ok(WorkerEvent::InputApplied(_)) => {}
             Ok(WorkerEvent::Finished(status)) => {
-                session.status = status;
+                session.status = status.unwrap_or_else(|error| error);
                 session.finished = true;
                 break;
             }

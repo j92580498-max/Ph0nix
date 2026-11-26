@@ -24,7 +24,7 @@ pub enum WorkerEvent {
     Lcd(LcdFrame),
     Status(String),
     InputApplied(String),
-    Finished(String),
+    Finished(Result<String, String>),
 }
 
 const MAX_PENDING_EVENTS: usize = 64;
@@ -192,8 +192,8 @@ impl Worker {
                             }
                         }
                     }
-                    if options.resume { session.save()?; return Ok("Stopped. Phone state saved.".into()); }
-                    return Ok("Stopped.".into());
+                    session.save()?;
+                    return Ok("Stopped. Phone state and internal storage saved.".into());
                 }
                 let registry = crate::registry();
                 let mut machine = registry.open(&paths.device, paths.loader.as_deref(), &paths.files, RuntimeOptions::default())?;
@@ -269,11 +269,11 @@ impl Worker {
             })();
             worker_files.fail_pending_commit("Phone stopped before the imported file could be saved.");
             let summary = match result {
-                Ok(summary) => { worker_diagnostics.log("info", "worker", &summary); summary },
+                Ok(summary) => { worker_diagnostics.log("info", "worker", &summary); Ok(summary) },
                 Err(error) => {
                     let summary = format!("{} error: {error:#}", paths.device);
                     worker_diagnostics.log("error", "worker", &summary);
-                    summary
+                    Err(summary)
                 },
             };
             worker_diagnostics.set_running(false);
@@ -330,7 +330,7 @@ mod tests {
             assert!(sender.send(WorkerEvent::Status(format!("{revision}"))).is_ok());
             assert!(sender.send(WorkerEvent::InputApplied(format!("input {revision}"))).is_ok());
         }
-        assert!(sender.send(WorkerEvent::Finished("firmware failure".into())).is_ok());
+        assert!(sender.send(WorkerEvent::Finished(Err("firmware failure".into()))).is_ok());
         assert!(events.inner.lock().unwrap().queue.len() <= MAX_PENDING_EVENTS);
         let mut revision = None; let mut finished = false;
         while let Ok(event) = events.try_recv() {

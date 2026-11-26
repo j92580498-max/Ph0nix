@@ -70,7 +70,7 @@ pub struct PhoneLauncher {
     frame_stats: FrameStats,
     sent_keys: u32,
     search: String,
-    stopping: Option<std::thread::JoinHandle<()>>,
+    stopping: Option<std::thread::JoinHandle<Option<Result<String, String>>>>,
     pending_run: Option<FirmwareSelection>,
     developer: crate::developer::DeveloperWindow,
     files: crate::files::FileTools,
@@ -140,7 +140,13 @@ impl PhoneLauncher {
         self.audio_error = None;
         if let Some(mut worker) = self.worker.take() {
             self.developer.retain_diagnostics(worker.diagnostics.clone());
-            self.stopping = Some(std::thread::spawn(move || worker.stop()));
+            self.stopping = Some(std::thread::spawn(move || {
+                worker.stop();
+                while let Ok(event) = worker.events.try_recv() {
+                    if let WorkerEvent::Finished(result) = event { return Some(result); }
+                }
+                None
+            }));
         }
         self.running = false;
         self.sent_keys = 0;
@@ -266,8 +272,16 @@ impl PhoneLauncher {
 
     fn drain_events(&mut self, ctx: &egui::Context) {
         if self.stopping.as_ref().is_some_and(|handle| handle.is_finished()) {
-            let _ = self.stopping.take().unwrap().join();
-            if let Some(paths) = self.pending_run.take() { self.spawn_profile_run(paths); }
+            let result = self.stopping.take().unwrap().join()
+                .unwrap_or_else(|_| Some(Err("Could not stop the previous phone session.".into())));
+            let pending = self.pending_run.take();
+            match result {
+                Some(Err(error)) => { self.status = error; }
+                result => {
+                    if let Some(paths) = pending { self.spawn_profile_run(paths); }
+                    else if let Some(Ok(summary)) = result { self.status = summary; }
+                }
+            }
         }
         while let Ok(event) = self.events_rx.try_recv() {
             self.dialog_open = false;
@@ -322,7 +336,7 @@ impl PhoneLauncher {
                         self.status = format!("Input: {summary}");
                         self.last_frame_status = Some(summary);
                     }
-                    WorkerEvent::Finished(summary) => finished = Some(summary),
+                    WorkerEvent::Finished(result) => finished = Some(result.unwrap_or_else(|error| error)),
                 }
             }
         }
@@ -511,10 +525,10 @@ impl PhoneLauncher {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Fullscreen(draft.fullscreen));
             }
             ui.end_row();
-            ui.label("Save and resume K750i"); ui.checkbox(&mut draft.resume, ""); ui.end_row();
+            ui.label("Resume saved K750i session"); ui.checkbox(&mut draft.resume, ""); ui.end_row();
         });
         ui.label("Presentation targets 60 FPS; guest LCD updates depend on firmware and host speed.");
-        ui.label("Disabling resume boots the original firmware state; enable it again to restore saved phone files.");
+        ui.label("Disabling resume cold boots K750i with its saved internal storage and settings.");
         ui.label("Interface based on J2ME-Loader (Apache-2.0); see bundled THIRD_PARTY_NOTICES.md.");
         ui.hyperlink_to("J2ME-Loader", "https://github.com/nikita36078/J2ME-Loader");
         ui.add_space(12.0);

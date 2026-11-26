@@ -1,0 +1,44 @@
+name: K750i internal storage
+on:
+  push:
+    branches: [test/k750i-internal-storage]
+permissions:
+  contents: read
+jobs:
+  cold-boot:
+    runs-on:
+      - self-hosted
+      - Linux
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: src
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Test the Rust host
+        run: cargo test --locked -p db2010-host -p k750-native
+      - name: Build the pinned DB2010 engine
+        run: |
+          python3 -m venv build/k750i-test-tools
+          tools="$PWD/build/k750i-test-tools/bin"
+          "$tools/python" -m pip install meson==1.11.1
+          export PATH="$tools:$PATH"
+          python -m db2010.development.source init
+          if ! python -m db2010.development.build --configure --jobs 2; then
+            find build/provenance/qemu -type f -name build.log -exec tail -n 80 {} \; || true
+            exit 1
+          fi
+      - name: Verify K750i internal storage across a cold boot
+        run: |
+          work="$(mktemp -d "$RUNNER_TEMP/ph0nix-k750i.XXXXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+          python3 -m db2010.development.firmware init k750i --prefix --input-root "$work"
+          firmware="$work/fw/k750i/images/R1DB001/cid49/sony-ericsson"
+          if ! cargo run --locked -p db2010-host --example phone-files-resume -- \
+            "$PWD/qemu/build/qemu-system-arm" --fresh "$work/phone" \
+            "$firmware/K750_R1DB001_MAIN_EU_1_CL_RED49.mbn" \
+            "$firmware/K750_R1DB001_FS_EMEA_1_RED49.fbn"; then
+            find "$work/phone" -type f -name engine.log -exec tail -n 80 {} \; || true
+            exit 1
+          fi
