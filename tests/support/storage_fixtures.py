@@ -21,4 +21,3 @@ def storage_state(tmp_path, operations=()):
         'block_erase': {'profile': 'samsung-x8-block-erase-immediate'},
         'main_array': {'profile': 'samsung-x8-known-main-read-program'}}
     return state
-

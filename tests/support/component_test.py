@@ -17,6 +17,7 @@ def component_inputs(*names):
                         '-DCPU_DEFS_H', '-DCOMPILING_SYSTEM_VS_USER', '-DCONFIG_SOFTMMU']
     return [*target_flags, '-ffunction-sections', '-fdata-sections', '-Wl,--gc-sections', '-std=gnu11', '-D_GNU_SOURCE', '-Wno-unused-parameter', '-Wno-missing-field-initializers', '-I'+str(source/'include'), '-I'+str(build), '-I'+str(build/'include'),
             *(str(source/'hw/arm'/f'db2010-{name}.c') for name in names),
+            *([str(RESOURCES/'checks/error_report_stub.c')] if 'i2c' in names else []),
             *([str(RESOURCES/'checks/absent_chardev.c')] if 'dsp-peer' in names else []),
             *([str(RESOURCES/'checks/virtual_clock_stub.c'),str(source/'hw/arm/db2010-clock.c')] if set(names) & {'timer','rtc','dsp-peer','simple'} else []),
             *([str(build/'hw/arm/db2010-faad2/libdb2010-faad-lc.a'), str(build/'libqemuutil.a'), '-lm'] if 'dsp-peer' in names else []),

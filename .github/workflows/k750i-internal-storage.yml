@@ -45,6 +45,7 @@ jobs:
       - name: Verify that a rejected PMIC write leaves committed flash recoverable
         run: |
           build/k750i-test-tools/bin/python -m pytest -q \
+            tests/test_i2c_handlers.py::test_i2c_transport_completion_and_private_peer_previews \
             tests/test_pmic_vibrator.py::test_pmic_fault_preserves_committed_internal_storage
       - name: Verify K750i internal storage across a cold boot
         run: |
