@@ -9,7 +9,7 @@ use db2010_host::{
 };
 use std::{
     fs,
-    path::PathBuf,
+    path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
 };
@@ -43,15 +43,23 @@ fn run(session: &mut Session, request: FileRequest) -> Result<FileJob> {
     }
 }
 
-fn wait_for_serial(session: &mut Session) -> Result<()> {
+fn wait_for_serial(session: &mut Session, workspace: &Path) -> Result<()> {
     let deadline = Instant::now() + Duration::from_secs(300);
     loop {
         let progress = session.progress()?;
-        ensure!(
-            progress["running"].as_bool() == Some(true),
-            "Firmware stopped during cold boot: {}",
-            session.summary()?
-        );
+        if progress["running"].as_bool() != Some(true) {
+            let snapshot = (|| -> Result<()> {
+                fs::write(
+                    workspace.join("failure-snapshot-chunks.json"),
+                    serde_json::to_vec(&session.snapshot_chunks()?)?,
+                )?;
+                Ok(())
+            })();
+            if let Err(error) = snapshot {
+                eprintln!("Could not capture the boot failure snapshot: {error:#}");
+            }
+            anyhow::bail!("Firmware stopped during cold boot: {}", session.summary()?);
+        }
         if progress["serial_input_ready"].as_bool() == Some(true)
             && progress["serial_cable_present"].as_bool() == Some(true)
         {
@@ -105,7 +113,7 @@ fn main() -> Result<()> {
         println!("{}", serde_json::json!({"phase":"initial_boot","state":state}));
         let mut session = Session::open(&engine, &state, checkpoint.as_deref())?;
         if checkpoint.is_none() {
-            wait_for_serial(&mut session)?;
+            wait_for_serial(&mut session, &workspace)?;
         }
         run(
             &mut session,
@@ -137,7 +145,7 @@ fn main() -> Result<()> {
         };
         let mut session = Session::start(&options, &state)?;
         if cold_boot {
-            wait_for_serial(&mut session)?;
+            wait_for_serial(&mut session, &workspace)?;
         }
         run(
             &mut session,

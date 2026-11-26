@@ -43,5 +43,19 @@ jobs:
             "$firmware/K750_R1DB001_MAIN_EU_1_CL_RED49.mbn" \
             "$firmware/K750_R1DB001_FS_EMEA_1_RED49.fbn"; then
             find "$work/phone" -type f -name engine.log -exec tail -n 80 {} \; || true
+            python3 - "$work/phone" <<'PY' || true
+          import base64
+          import json
+          from pathlib import Path
+          import sys
+
+          for path in Path(sys.argv[1]).rglob('failure-snapshot-chunks.json'):
+              chunks = json.loads(path.read_text())
+              snapshot = json.loads(b''.join(base64.b64decode(chunk['data_base64']) for chunk in chunks))
+              print('Firmware registers:', json.dumps(snapshot.get('registers')))
+              i2c = snapshot.get('i2c', {})
+              i2c['captured_writes'] = i2c.get('captured_writes', [])[-8:]
+              print('I2C at firmware stop:', json.dumps(i2c))
+          PY
             exit 1
           fi

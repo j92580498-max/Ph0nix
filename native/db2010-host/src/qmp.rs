@@ -375,6 +375,31 @@ impl Session {
         self.read_engine_log();
         Ok(progress)
     }
+    pub fn snapshot_chunks(&mut self) -> Result<Vec<Value>> {
+        // Full firmware snapshots can exceed the QMP frame bound. Keep each
+        // authenticated engine chunk bounded and save its original envelope.
+        self.qmp.execute("qom-set", serde_json::json!({"path":"/machine",
+            "property":"snapshot-chunk","value":"start"}))?;
+        let mut chunks = Vec::new();
+        let mut offset = 0;
+        loop {
+            let chunk = self.qmp.property("/machine", "snapshot-chunk")?;
+            let total = chunk["total"].as_u64().context("snapshot total")?;
+            let encoded = chunk["data_base64"].as_str().context("snapshot data")?;
+            anyhow::ensure!(total <= 16 * 1024 * 1024 && chunk["offset"].as_u64() == Some(offset),
+                "snapshot exceeds bound or has a discontinuous cursor");
+            anyhow::ensure!(!encoded.is_empty() && encoded.len() % 4 == 0, "invalid snapshot chunk");
+            let padding = encoded.bytes().rev().take_while(|byte| *byte == b'=').count();
+            anyhow::ensure!(padding <= 2, "invalid snapshot padding");
+            let bytes = encoded.len() / 4 * 3 - padding;
+            anyhow::ensure!(bytes > 0 && bytes <= 256 * 1024 && offset + bytes as u64 <= total,
+                "invalid snapshot chunk size");
+            offset += bytes as u64;
+            chunks.push(chunk);
+            if offset == total { break; }
+        }
+        Ok(chunks)
+    }
     pub fn summary(&mut self) -> Result<Value> {
         let summary=self.qmp.property("/machine","summary")?;
         if !summary["stop"].is_null() {
