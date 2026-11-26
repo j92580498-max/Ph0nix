@@ -46,70 +46,6 @@ index 93bf1c9f1db6a36e62b4f3b447001596ce38c729..62f643b109b5b01f5f7638cbcbe75ba7
  void dbfc_export(DB2010F500Control *model, QDict *snapshot);
  void db2010_startup_export(DB2010Startup *model, QDict *snapshot);
  void db2010_fa_dma_export(DB2010FaLink *model, QDict *snapshot);
-diff --git a/hw/arm/db2010-cpu.c b/hw/arm/db2010-cpu.c
-index c6c8f1343d1db03bb30d7474e0dfc61629427da4..f93e9bfb2ae4117220374a02ec290d73b44d1374 100644
---- a/hw/arm/db2010-cpu.c
-+++ b/hw/arm/db2010-cpu.c
-@@ -17,6 +17,35 @@ void db2010_runtime_observe(DB2010MachineState *s)
-     }
- }
- 
-+/* Read-only trace of the R1DB001 insertion path. Only emitted after insertion. */
-+static const uint32_t ms_detect_pcs[] = {
-+    0x44ae26ea, /* pending mask */
-+    0x44ae272e, /* input level */
-+    0x44ae2784, /* debounce request */
-+    0x44ae27d8, /* debounce flag */
-+    0x44ae27e6, /* listener flag */
-+    0x44ae283c, 0x44ae2840, /* send and result */
-+    0x44ae2938, 0x44ae257a, 0x44ae25b8, /* alternate sends */
-+    0x44892520, 0x44892560, /* received message and decoded signal */
-+    0x44892584, 0x448925c6, /* debounce timer request and expiration */
-+    0x448925dc, 0x448925f0, /* rechecked input */
-+    0x448926d8, 0x44892944, 0x4489420c, /* card task and controller setup */
-+};
-+
-+static int ms_detect_trace_index(DB2010MachineState *s, uint32_t pc)
-+{
-+    if (!s->bank->has_memorystick_slot || s->research_guards ||
-+        ((pc & 0xffff0000) != 0x44ae0000 && (pc & 0xffff0000) != 0x44890000)) {
-+        return -1;
-+    }
-+    for (int i = 0; i < ARRAY_SIZE(ms_detect_pcs); i++) {
-+        if (pc == ms_detect_pcs[i]) {
-+            return i;
-+        }
-+    }
-+    return -1;
-+}
-+
- bool db2010_cpu_instruction_needed(void *opaque, uint32_t pc,
-                                   uint32_t insn, bool thumb)
- {
-@@ -27,6 +56,7 @@ bool db2010_cpu_instruction_needed(void *opaque, uint32_t pc,
-         (s->synthetic_sha && (pc == 0xffff0f48 || pc == 0xffff112c || pc == 0xffff129e)) ||
-         (s->has_nor && s->nor->probes &&
-          (pc == s->nor->probe_pcs[0] || pc == s->nor->probe_pcs[1])) ||
-+        (thumb && ms_detect_trace_index(s, pc) >= 0) ||
-         (!thumb && (insn & 0x0f000f10) == 0x0e000f10);
- }
- 
-@@ -37,6 +67,15 @@ void db2010_cpu_instruction(void *opaque, CPUARMState *env,
-     DB2010MachineState *s = opaque;
-     uint32_t pc = env->regs[15];
-     db2010_runtime_observe(s);
-+    if (s->bank->memorystick_present && env->thumb) {
-+        int trace = ms_detect_trace_index(s, pc);
-+        if (trace >= 0 && s->memorystick_trace_hits[trace] < 3) {
-+            s->memorystick_trace_hits[trace]++;
-+            fprintf(stderr, "Memory Stick detect pc=%08x r0=%08x r1=%08x "
-+                    "r2=%08x r3=%08x lr=%08x\n", pc, env->regs[0],
-+                    env->regs[1], env->regs[2], env->regs[3], env->regs[14]);
-+        }
-+    }
-     db2010_cpu_service(s, env, pc, size);
-     db2010_cpu_control(s, env, pc, size, insn);
-     if (s->has_nor && s->nor->probes &&
 diff --git a/hw/arm/db2010-device.c b/hw/arm/db2010-device.c
 index 41a0a77d248241c1568d555153976d24ec3f2806..1a9e6284ed3bc63ce7a70b873e1b0f0306f8664d 100644
 --- a/hw/arm/db2010-device.c
@@ -122,18 +58,6 @@ index 41a0a77d248241c1568d555153976d24ec3f2806..1a9e6284ed3bc63ce7a70b873e1b0f03
          if (s->registers) {
              for (unsigned i = 0; i < s->registers->len; i++) {
                  DB2010Register *r = g_ptr_array_index(s->registers, i);
-diff --git a/hw/arm/db2010-internal.h b/hw/arm/db2010-internal.h
-index bc7f2026c4d992e12148966226df6f24c37de7d9..9c2f857f281c1a78cc634b7c6d698b0f904b4c0c 100644
---- a/hw/arm/db2010-internal.h
-+++ b/hw/arm/db2010-internal.h
-@@ -101,6 +101,7 @@ struct DB2010MachineState {
-     GHashTable *mmio_index;
-     bool has_power_hold;
-     uint32_t instruction_pc;
-+    uint8_t memorystick_trace_hits[32];
-     bool has_nor;
-     DB2010Nor *nor;
-     bool has_absent_bank;
 diff --git a/hw/arm/db2010-memorystick.c b/hw/arm/db2010-memorystick.c
 new file mode 100644
 index 0000000000000000000000000000000000000000..c4390d31a6158281a01ee2805e99c4e3e7890166

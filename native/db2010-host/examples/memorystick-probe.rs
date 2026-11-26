@@ -128,18 +128,13 @@ fn list(session: &mut Session, path: &[String]) -> Result<Vec<FileEntry>> {
 }
 
 fn find_card_folder(session: &mut Session) -> Result<Vec<String>> {
-    let root = list(session, &[])?;
-    for entry in root.iter().filter(|entry| entry.directory) {
-        let top = vec![entry.name.clone()];
-        let folders = list(session, &top)?;
-        for folder in folders.iter().filter(|e| e.directory && ["Other", "Прочее", "Другое"].iter().any(|name| e.name.to_lowercase() == name.to_lowercase())) {
-            let path = vec![entry.name.clone(), folder.name.clone()];
-            if list(session, &path)?.iter().any(|e| !e.directory && e.name.eq_ignore_ascii_case(SEED)) {
-                return Ok(path);
-            }
-        }
-    }
-    bail!("K750i file service did not expose the seeded card file; Memory Stick: {}", probe(session)?)
+    let folder = list(session, &[])?.into_iter()
+        .find(|entry| entry.directory && entry.name.eq_ignore_ascii_case("Memory Stick"))
+        .context("K750i file service did not expose the Memory Stick")?;
+    let path = vec![folder.name];
+    ensure!(list(session, &path)?.iter().any(|entry| !entry.directory && entry.name.eq_ignore_ascii_case(SEED)),
+        "K750i did not list the seed file at the root of the Memory Stick; card: {}", probe(session)?);
+    Ok(path)
 }
 
 fn export(session: &mut Session, path: Vec<String>, host: PathBuf, expected: &[u8]) -> Result<()> {
@@ -160,26 +155,30 @@ fn main() -> Result<()> {
     let workspace = workspace.canonicalize()?;
     let options = HostOptions { engine, data_dir: workspace.clone(), resume: true };
     let card = CardImage::create(&workspace.join("card.img"), 32)?;
-    let other = vec!["MSSEMC".into(), "Media files".into(), "other".into()];
-    for depth in 1..=other.len() {
-        card.make_directory(&other[..depth])?;
-    }
     let seed = b"This file was placed on the card before boot.\r\n".repeat(140);
     let written = b"This file was written by the K750i firmware.\r\n".repeat(240);
     let seed_host = workspace.join("seed-input.txt");
     fs::write(&seed_host, &seed)?;
-    card.import_file(&[other.clone(), vec![SEED.into()]].concat(), &seed_host, false, false)?;
+    card.import_file(&[SEED.into()], &seed_host, false, false)?;
     let write_host = workspace.join("write-input.txt");
     fs::write(&write_host, &written)?;
 
     let prepared = prepare::prepare_locked_at(&main, &fs_image, &workspace)?;
     let mut session = boot(&options, prepared, &card, true)?;
-    let folder = find_card_folder(&mut session)?;
+    let folder = match find_card_folder(&mut session) {
+        Ok(folder) => folder,
+        Err(error) => {
+            drop(session);
+            println!("Card root after stopping the engine: {:?}", card.list(&[]));
+            return Err(error);
+        }
+    };
     export(&mut session, [folder.clone(), vec![SEED.into()]].concat(), workspace.join("readback.txt"), &seed)?;
     let path = [folder.clone(), vec![WRITTEN.into()]].concat();
+    let before = probe(&mut session)?["sectors_written"].as_u64().context("Missing card write counter")?;
     request(&mut session, FileRequest::Import { path: path.clone(), host: write_host, replace: false, move_source: false })?;
     let status = probe(&mut session)?;
-    ensure!(status["sectors_written"].as_u64().unwrap_or(0) > 0, "No sector writes through the card controller: {status}");
+    ensure!(status["sectors_written"].as_u64().unwrap_or(0) > before, "No sector writes through the card controller since import (was {before}): {status}");
     println!("After firmware write: {status}");
     // A connected card has its own state and must survive a normal stop
     // even when the launcher is configured to resume the phone session.
@@ -187,7 +186,7 @@ fn main() -> Result<()> {
     drop(session);
 
     let raw_readback = workspace.join("image-readback.txt");
-    card.export_file(&[other, vec![WRITTEN.into()]].concat(), &raw_readback, false)?;
+    card.export_file(&[WRITTEN.into()], &raw_readback, false)?;
     ensure!(fs::read(raw_readback)? == written, "Firmware write did not persist in the card image");
     ensure!(!workspace.join("phone.saved.json").exists(), "Unexpected checkpoint in a cold-boot test");
     let prepared = prepare::prepare_locked_at(&main, &fs_image, &workspace)?;
