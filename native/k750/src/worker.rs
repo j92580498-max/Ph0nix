@@ -377,8 +377,8 @@ mod tests {
             worker.set_phone_keys(key.bit());
             worker.set_phone_keys(key.bit()); // A held contact has no second edge.
             worker.set_phone_keys(0);
-            assert_eq!(receiver.try_recv().unwrap(), key.bit());
-            assert_eq!(receiver.try_recv().unwrap(), 0);
+            assert!(matches!(receiver.try_recv(), Ok(WorkerCommand::Keys(mask)) if mask == key.bit()));
+            assert!(matches!(receiver.try_recv(), Ok(WorkerCommand::Keys(0))));
             assert!(receiver.try_recv().is_err());
             assert!(!worker.diagnostics.developer_mode());
         }
