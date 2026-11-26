@@ -9,7 +9,7 @@ use db2010_host::{
 use serde_json::{json, Value};
 use std::{
     fs,
-    path::{Path, PathBuf},
+    path::PathBuf,
     thread,
     time::{Duration, Instant},
 };
@@ -182,16 +182,36 @@ fn main() -> Result<()> {
     println!("After firmware write: {status}");
     // A connected card has its own state and must survive a normal stop
     // even when the launcher is configured to resume the phone session.
-    session.save_with_resume(options.resume)?;
+    list(&mut session, &folder).context("Listing card files after the firmware import")?;
+    session.save_with_resume(options.resume).context("Saving the first card session")?;
     drop(session);
 
+    let root = card.list(&[]).context("Opening the raw card after stopping the engine")?;
+    println!("Raw card root after stopping the engine: {}", serde_json::to_string(&root)?);
     let raw_readback = workspace.join("image-readback.txt");
-    card.export_file(&[WRITTEN.into()], &raw_readback, false)?;
-    ensure!(fs::read(raw_readback)? == written, "Firmware write did not persist in the card image");
+    let raw_result = (|| -> Result<()> {
+        card.export_file(&[WRITTEN.into()], &raw_readback, false)
+            .context("Extracting the imported file from the raw FAT16 root")?;
+        ensure!(fs::read(raw_readback).context("Reading the extracted file")? == written,
+            "Firmware write did not persist in the card image");
+        Ok(())
+    })();
+    if let Err(error) = &raw_result {
+        println!("Raw image readback failed: {error:#}");
+        for dirs in [&["MP3"][..], &["MSSEMC"], &["MSSEMC", "Media files"],
+            &["MSSEMC", "Media files", "other"]] {
+            let parts = dirs.iter().map(|part| (*part).into()).collect::<Vec<String>>();
+            println!("Raw card {}: {:?}", dirs.join("/"), card.list(&parts));
+        }
+    }
     ensure!(!workspace.join("phone.saved.json").exists(), "Unexpected checkpoint in a cold-boot test");
-    let prepared = prepare::prepare_locked_at(&main, &fs_image, &workspace)?;
+    let prepared = prepare::prepare_locked_at(&main, &fs_image, &workspace)
+        .context("Preparing a cold boot with the saved internal memory")?;
     let mut session = boot(&options, prepared, &card, false)?;
-    export(&mut session, path, workspace.join("cold-readback.txt"), &written)?;
+    list(&mut session, &folder).context("Listing card files after the cold boot")?;
+    export(&mut session, path, workspace.join("cold-readback.txt"), &written)
+        .context("Reading the imported file through firmware after the cold boot")?;
+    raw_result?;
     println!("Memory Stick read, write and cold-boot persistence passed");
     Ok(())
 }
