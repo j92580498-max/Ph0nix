@@ -11,8 +11,9 @@ On a runner with a built DB2010 engine and a disposable copied firmware workspac
 The `K750i internal storage` GitHub Actions workflow runs on pushes to
 `test/k750i-internal-storage`. It uses the `self-hosted` and `Linux` runner labels;
 add the container's custom label under `runs-on` if the repository has several
-Linux runners. The container needs a current stable Rust toolchain, Python 3
-with `venv`, and these build packages (Debian/Ubuntu names): `build-essential`, `cmake`, `ninja-build`,
+Linux runners. The workflow sets up stable Rust for the runner user. The
+container needs Python 3 with `venv` and these build packages (Debian/Ubuntu
+names): `build-essential`, `cmake`, `ninja-build`,
 `pkg-config`, `python3-venv`, `clang`, `libclang-dev`, `libglib2.0-dev`,
 `libpixman-1-dev`, `libfdt-dev` and `zlib1g-dev`. It builds the pinned engine,
 fetches the authenticated MAIN/FS, and runs the example with
