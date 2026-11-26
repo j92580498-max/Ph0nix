@@ -456,13 +456,13 @@ class MainActivity : AppCompatActivity() {
         val cards = File(filesDir, "cards").listFiles()
             ?.filter { it.isFile && it.extension.equals("img", ignoreCase = true) }
             ?.sortedBy { it.name }.orEmpty()
-        val choices = listOf("Start without a card", "Create a 32 MiB card and start", "Import an image and start…") +
+        val choices = listOf("Start without a card", "Create a card and start…", "Import an image and start…") +
             cards.map { "${it.name} (${it.length() / 1048576} MiB)" }
         MaterialAlertDialogBuilder(this).setTitle("K750i Memory Stick")
             .setItems(choices.toTypedArray()) { _, index ->
                 when (index) {
                     0 -> launchFirmware(entry, null)
-                    1 -> prepareBootCard(entry.id, null)
+                    1 -> chooseBootCardSize(entry.id)
                     2 -> {
                         pendingCardEntryId = entry.id
                         importBootCard.launch(arrayOf("*/*"))
@@ -472,7 +472,16 @@ class MainActivity : AppCompatActivity() {
             }.setNegativeButton(R.string.cancel, null).show()
     }
 
-    private fun prepareBootCard(entryId: String, source: Uri?) {
+    private fun chooseBootCardSize(entryId: String) {
+        val sizes = listOf(16, 32, 64, 128, 256, 512, 1024)
+        val labels = sizes.map { if (it == 1024) "1 GiB" else "$it MiB" }.toTypedArray()
+        MaterialAlertDialogBuilder(this).setTitle("Choose Memory Stick size")
+            .setItems(labels) { _, index -> prepareBootCard(entryId, source = null, sizeMib = sizes[index]) }
+            .setNegativeButton(R.string.cancel, null).show()
+    }
+
+    private fun prepareBootCard(entryId: String, source: Uri?, sizeMib: Int? = null) {
+        if (busy) return
         setBusy(true)
         lifecycleScope.launch {
             val result = withContext(Dispatchers.IO) {
@@ -500,7 +509,8 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                         val request = JSONObject().put("image", image.absolutePath)
-                            .put("operation", if (source == null) "create" else "info").put("size_mib", 32)
+                            .put("operation", if (source == null) "create" else "info")
+                        if (source == null) request.put("size_mib", requireNotNull(sizeMib))
                         val response = JSONObject(NativeBridge.nativeCardRequest(request.toString()))
                         check(!response.has("error")) { response.optString("error") }
                     } catch (error: Exception) {
