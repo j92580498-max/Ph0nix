@@ -23,7 +23,7 @@ install_archive() (
     (cd "$work" && printf '%s  %s\n' "$checksum" "$archive" | sha1sum --check --status)
     unpacked="$work/${archive%.zip}"
     mkdir -p "$unpacked" "$(dirname "$sdk/$destination")"
-    unzip -q "$work/$archive" -d "$unpacked"
+    (cd "$unpacked" && cmake -E tar xf "$work/$archive")
     shopt -s nullglob
     dirs=("$unpacked"/*/)
     [[ ${#dirs[@]} -eq 1 && -f "${dirs[0]}$required" ]]
