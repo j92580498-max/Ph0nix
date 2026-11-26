@@ -20,6 +20,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.tabs.TabLayout
@@ -27,6 +28,8 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
 import java.io.File
 import org.json.JSONArray
+import org.json.JSONObject
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,6 +43,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var importButton: FloatingActionButton
     private var pendingNandEntryId: String? = null
     private var pendingMemoryEntryId: String? = null
+    private var pendingCardEntryId: String? = null
     private var importDevice = "k750i"
     private var busy = false
     private lateinit var preferences: AppPreferences
@@ -69,11 +73,18 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument(),
     ) { uri -> finishMemorySelection(uri, importing = true) }
 
+    private val importBootCard = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val id = pendingCardEntryId
+        pendingCardEntryId = null
+        if (uri != null && id != null && !busy) prepareBootCard(id, uri)
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         preferences = AppPreferences(this)
         pendingNandEntryId = savedInstanceState?.getString(STATE_NAND_ENTRY)
         pendingMemoryEntryId = savedInstanceState?.getString(STATE_MEMORY_ENTRY)
+        pendingCardEntryId = savedInstanceState?.getString(STATE_CARD_ENTRY)
         importDevice = savedInstanceState?.getString(STATE_IMPORT_DEVICE)
             ?.takeIf { DeviceProfiles.find(it) != null } ?: importDevice
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -129,6 +140,7 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_NAND_ENTRY, pendingNandEntryId)
         outState.putString(STATE_MEMORY_ENTRY, pendingMemoryEntryId)
+        outState.putString(STATE_CARD_ENTRY, pendingCardEntryId)
         outState.putString(STATE_IMPORT_DEVICE, importDevice)
         outState.putInt("tab", tabs.selectedTabPosition)
         super.onSaveInstanceState(outState)
@@ -437,10 +449,79 @@ class MainActivity : AppCompatActivity() {
 
     private fun runFirmware(entry: FirmwareEntry) {
         if (busy) return
+        if (entry.device != "k750i") {
+            launchFirmware(entry, null)
+            return
+        }
+        val cards = File(filesDir, "cards").listFiles()
+            ?.filter { it.isFile && it.extension.equals("img", ignoreCase = true) }
+            ?.sortedBy { it.name }.orEmpty()
+        val choices = listOf("Start without a card", "Create a 32 MiB card and start", "Import an image and start…") +
+            cards.map { "${it.name} (${it.length() / 1048576} MiB)" }
+        MaterialAlertDialogBuilder(this).setTitle("K750i Memory Stick")
+            .setItems(choices.toTypedArray()) { _, index ->
+                when (index) {
+                    0 -> launchFirmware(entry, null)
+                    1 -> prepareBootCard(entry.id, null)
+                    2 -> {
+                        pendingCardEntryId = entry.id
+                        importBootCard.launch(arrayOf("*/*"))
+                    }
+                    else -> launchFirmware(entry, cards[index - 3])
+                }
+            }.setNegativeButton(R.string.cancel, null).show()
+    }
+
+    private fun prepareBootCard(entryId: String, source: Uri?) {
+        setBusy(true)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val entry = library.entries().firstOrNull { it.id == entryId && it.device == "k750i" }
+                        ?: error(getString(R.string.k750_memory_missing_entry))
+                    val directory = File(filesDir, "cards")
+                    check(directory.isDirectory || directory.mkdirs()) { "Could not create the card images folder." }
+                    val image = File(directory, "card-${UUID.randomUUID()}.img")
+                    try {
+                        if (source != null) {
+                            val input = contentResolver.openInputStream(source) ?: error("Could not open the card image.")
+                            input.use {
+                                image.outputStream().use { output ->
+                                    val buffer = ByteArray(64 * 1024)
+                                    var total = 0L
+                                    while (true) {
+                                        val count = input.read(buffer)
+                                        if (count == -1) break
+                                        total += count
+                                        check(total <= 1024L * 1024 * 1024) { "The card image exceeds 1 GiB." }
+                                        output.write(buffer, 0, count)
+                                    }
+                                }
+                            }
+                        }
+                        val request = JSONObject().put("image", image.absolutePath)
+                            .put("operation", if (source == null) "create" else "info").put("size_mib", 32)
+                        val response = JSONObject(NativeBridge.nativeCardRequest(request.toString()))
+                        check(!response.has("error")) { response.optString("error") }
+                    } catch (error: Exception) {
+                        image.delete()
+                        throw error
+                    }
+                    entry to image
+                }
+            }
+            setBusy(false)
+            result.onSuccess { (entry, image) -> launchFirmware(entry, image) }
+                .onFailure { showMessage(it.message ?: "Could not prepare the Memory Stick.") }
+        }
+    }
+
+    private fun launchFirmware(entry: FirmwareEntry, card: File?) {
         startActivity(
             Intent(this, EmulatorActivity::class.java)
                 .putExtra(EmulatorActivity.EXTRA_SELECTION, entry.selectionJson())
-                .putExtra(EmulatorActivity.EXTRA_MEMORY_WORKSPACE, entry.memoryWorkspace?.absolutePath),
+                .putExtra(EmulatorActivity.EXTRA_MEMORY_WORKSPACE, entry.memoryWorkspace?.absolutePath)
+                .putExtra(EmulatorActivity.EXTRA_CARD_IMAGE, card?.absolutePath),
         )
     }
 
@@ -484,6 +565,7 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         const val STATE_NAND_ENTRY = "pendingNandEntryId"
         const val STATE_MEMORY_ENTRY = "pendingMemoryEntryId"
+        const val STATE_CARD_ENTRY = "pendingCardEntryId"
         const val MAX_MEMORY_FILE_BYTES = 65L * 1024 * 1024
         const val STATE_IMPORT_DEVICE = "importDevice"
     }

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! Raw FAT16 removable-card images. The app can browse these images; the
-//! K750 Memory Stick bus requires a separately implemented controller.
+//! Raw FAT16 removable-card images and exclusive host-side file operations.
 use super::{digest, obex::validate_path, FileEntry, MAX_FILE_BYTES, NONCE};
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{ensure, Context, Result};
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -18,8 +17,6 @@ pub struct CardInfo {
     pub size_bytes: u64,
     pub free_bytes: u64,
     pub filesystem: String,
-    pub guest_mounted: bool,
-    pub guest_mount_supported: bool,
 }
 #[derive(Clone, Debug)]
 pub struct CardImage {
@@ -116,8 +113,8 @@ impl CardImage {
             .map_err(|e| anyhow::anyhow!("Card image is in use: {e}"))?;
         let size = file.metadata()?.len();
         ensure!(
-            (16 * 1024 * 1024..=1024 * 1024 * 1024).contains(&size) && size % 512 == 0,
-            "Unsupported raw card image size"
+            (16 * 1024 * 1024..=1024 * 1024 * 1024).contains(&size) && size % (32 * 1024) == 0,
+            "Card image must be 16 MiB to 1 GiB and aligned to 32 KiB"
         );
         let mut boot = [0; 512];
         file.read_exact(&mut boot)?;
@@ -158,8 +155,6 @@ impl CardImage {
                 size_bytes: size,
                 free_bytes: stats.free_clusters() as u64 * stats.cluster_size() as u64,
                 filesystem: "FAT16".into(),
-                guest_mounted: false,
-                guest_mount_supported: false,
             })
         })
     }
@@ -324,9 +319,6 @@ impl CardImage {
             Ok(())
         })
     }
-    pub fn mount_in_phone(&self) -> Result<()> {
-        bail!("K750 uses Memory Stick Duo; its card controller is not implemented yet. This FAT16 image can be managed in the app and transferred to phone storage.")
-    }
 }
 
 fn write_verified(
@@ -436,7 +428,6 @@ mod tests {
         let dir = WorkDir::new();
         let card = CardImage::create(&dir.0.join("card.img"), 16).unwrap();
         assert_eq!(card.info().unwrap().filesystem, "FAT16");
-        assert!(!card.info().unwrap().guest_mounted);
         card.make_directory(&path("Music")).unwrap();
         let source = dir.0.join("source.bin");
         let bytes: Vec<u8> = (0..100000).map(|n| (n * 37) as u8).collect();

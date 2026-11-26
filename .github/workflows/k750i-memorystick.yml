@@ -66,3 +66,6 @@ jobs:
             find "$work/phone" -name engine.log -type f -print -exec tail -n 80 {} \;
             exit 1
           fi
+  android:
+    needs: probe
+    uses: ./.github/workflows/k750i-android-apk.yml

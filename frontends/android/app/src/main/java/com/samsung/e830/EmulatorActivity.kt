@@ -157,6 +157,7 @@ class EmulatorActivity : AppCompatActivity() {
         } else if (temporary) staged?.delete()
     }
     private val selection by lazy { intent.getStringExtra(EXTRA_SELECTION).orEmpty() }
+    private val bootCard by lazy { intent.getStringExtra(EXTRA_CARD_IMAGE).orEmpty() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -341,7 +342,7 @@ class EmulatorActivity : AppCompatActivity() {
                     File(applicationInfo.nativeLibraryDir, "libdb2010_engine.so").absolutePath,
                     File(filesDir, "sessions").absolutePath, preferences.resume,
                 )
-                NativeBridge.nativeStartSelection(selection, intent.getStringExtra(EXTRA_MEMORY_WORKSPACE).orEmpty()).also {
+                NativeBridge.nativeStartSelection(selection, intent.getStringExtra(EXTRA_MEMORY_WORKSPACE).orEmpty(), bootCard).also {
                     check(it != 0L) { "Could not start the phone." }
                 }
             } catch (error: Throwable) {
@@ -635,7 +636,9 @@ class EmulatorActivity : AppCompatActivity() {
 
     private fun showCards() {
         val cards = File(filesDir, "cards").listFiles()?.filter { it.isFile && it.extension.lowercase() == "img" }.orEmpty()
-        val labels = listOf("Create image…", "Import image…") + cards.map { "${it.name} (${it.length() / 1048576} MiB)" }
+        val labels = listOf("Create image…", "Import image…") + cards.map {
+            if (it.absolutePath == bootCard) "${it.name} (inserted)" else "${it.name} (${it.length() / 1048576} MiB)"
+        }
         MaterialAlertDialogBuilder(this).setTitle("Removable card images")
             .setItems(labels.toTypedArray()) { _, index ->
                 when (index) {
@@ -652,7 +655,7 @@ class EmulatorActivity : AppCompatActivity() {
         val size = android.widget.EditText(this).apply { hint = "Size in MiB (16–1024)"; setText("64"); inputType = android.text.InputType.TYPE_CLASS_NUMBER }
         layout.addView(name); layout.addView(size)
         MaterialAlertDialogBuilder(this).setTitle("Create FAT16 card image").setView(layout)
-            .setMessage("The image can store files. The K750i Memory Stick mount is still under development.")
+            .setMessage("Choose this image from the library when starting K750i.")
             .setNegativeButton("Cancel", null).setPositiveButton("Create") { _, _ ->
                 val label = name.text.toString().trim()
                 val mib = size.text.toString().toLongOrNull()
@@ -666,8 +669,14 @@ class EmulatorActivity : AppCompatActivity() {
     }
 
     private fun cardActions(image: File) {
+        if (image.absolutePath == bootCard) {
+            MaterialAlertDialogBuilder(this).setTitle(image.name)
+                .setMessage("This Memory Stick is inserted. Use the K750i file manager, or stop the phone to work with the image.")
+                .setPositiveButton("Close", null).show()
+            return
+        }
         MaterialAlertDialogBuilder(this).setTitle(image.name)
-            .setMessage("FAT16 image · ${image.length() / 1048576} MiB. The K750i Memory Stick controller mount is under development.")
+            .setMessage("FAT16 image · ${image.length() / 1048576} MiB. Choose this image from the library when starting K750i.")
             .setPositiveButton("Browse files") { _, _ -> showCardFiles(image.absolutePath) }
             .setNeutralButton("Export image…") { _, _ ->
                 documentExport = image; documentExportTemporary = false
@@ -914,6 +923,7 @@ class EmulatorActivity : AppCompatActivity() {
     companion object {
         const val EXTRA_SELECTION = "com.samsung.e830.SELECTION"
         const val EXTRA_MEMORY_WORKSPACE = "com.samsung.e830.MEMORY_WORKSPACE"
+        const val EXTRA_CARD_IMAGE = "com.samsung.e830.CARD_IMAGE"
         private const val MENU_FILES = 1
         private const val MENU_BLUETOOTH = 2
         private const val MENU_CARDS = 3

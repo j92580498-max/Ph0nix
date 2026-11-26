@@ -48,7 +48,7 @@ It writes `ph0nix-transfer-test.txt`, exports it into the prepared-state directo
 
 ### Experimental K750i Memory Stick PRO Duo
 
-Start K750i and wait for it to finish booting. Open **Card images**, create or open a FAT16 `.img`, and choose **Insert into K750i**. The engine raises the card insertion interrupt and serves sector reads and writes to the phone from this separate file. Once the firmware recognizes the card, use **Phone files** to access it. The engine holds an exclusive lock, so stop the phone before editing, replacing, or reinserting the image. Use the same `.img` to reuse the card after a cold boot. A normal stop with a card inserted saves internal storage without a VM checkpoint.
+On desktop, open **Card images**, create or open a FAT16 `.img`, and select **Use for the next K750i boot**. On Android, choose a card image when starting a K750i from the library, or create a new 32 MiB image. The engine attaches the image before the CPU starts, so the firmware can detect it during boot. Stop the phone before changing the image or editing it from the host. To reuse a card after a cold boot, select the same `.img`. A normal stop with a card inserted saves internal storage without a VM checkpoint.
 
 Firmware compatibility is checked by the `K750i Memory Stick storage` workflow on CT100. It exercises the stock R1DB001 firmware, including file listing, writeback to the raw image, and reopening the file after a cold boot.
 
@@ -79,7 +79,7 @@ The configuration callback at `0x44894C50` parses `intline` and binds it through
 
 Insertion uses a second interrupt. `dda/GPIO4` has compact line 69, tertiary bit 9 and cascade 30. The detect task at `0x448924B4` subscribes through `0x44AE2F94` with port 4, pin mask `0x04`, mode 2 and option 0. The supplied code clears the pin's direction bit at `0xF900002A`, sets polarity at `0xF900002E` according to its current level, and enables it at `0xF900002C`. The GPIO4 handler at `0x44AE240C` reads pending bits at `0xF9000030`, disables the selected pin, emits event `0x618D` and changes polarity before re-enabling it. `0x44892834` interprets GPIO42 low as inserted. The detect task consumes that event, schedules a debounce value of 20, rechecks the input, then calls `0x448926D8` to start the Memory Stick task.
 
-`build/ph0nix-memorystick-routing.txt` records the configuration bytes and supplied K750 disassembly for these findings. Removing the empty-slot profile from a copied running checkpoint and running for five host seconds (4.29 guest seconds) produced no new controller accesses (`build/ph0nix-card-probe/probe.log`); a GPIO value change without the insertion interrupt is insufficient. The image-backed controller uses the GPIO insertion interrupt; the regular empty-slot GPIO42 model still applies when no card is attached.
+`build/ph0nix-memorystick-routing.txt` records the configuration bytes and supplied K750 disassembly for these findings. Removing the empty-slot profile from a copied running checkpoint and running for five host seconds (4.29 guest seconds) produced no new controller accesses (`build/ph0nix-card-probe/probe.log`); a GPIO value change without the insertion interrupt is insufficient. The apps present the card at boot so the firmware can sample the GPIO42 level directly. Insertion while powered on remains a developer probe.
 
 GitHub code searches for `MSPRO_CMD_READ_ATRB` and `MS_TPC_READ_REG` in `torvalds/linux` found useful protocol references at commit `aacb7797504183a90d66b19b1efb555cfe9b3eec`:
 

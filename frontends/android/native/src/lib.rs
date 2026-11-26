@@ -53,7 +53,7 @@ fn new_string(env: &mut JNIEnv<'_>, value: &str) -> jstring {
         .unwrap_or(std::ptr::null_mut())
 }
 
-fn start_selection(selection: FirmwareSelection, workspace: Option<PathBuf>) -> Result<jlong, String> {
+fn start_selection(selection: FirmwareSelection, workspace: Option<PathBuf>, card: Option<PathBuf>) -> Result<jlong, String> {
     let registry = k750_native::registry();
     let name = registry
         .device(&selection.device)
@@ -61,7 +61,7 @@ fn start_selection(selection: FirmwareSelection, workspace: Option<PathBuf>) -> 
         .info()
         .name;
     let options=HOST.get_or_init(||Mutex::new(None)).lock().map_err(|e|e.to_string())?.clone();
-    let worker = Worker::start_in_workspace(selection, options, workspace).map_err(|error| error.to_string())?;
+    let worker = Worker::start_with_card(selection, options, workspace, card).map_err(|error| error.to_string())?;
     Ok(Box::into_raw(Box::new(Mutex::new(Session {
         worker,
         frame: None,
@@ -182,12 +182,15 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStartSelection<'
     _this: JObject<'local>,
     json: JString<'local>,
     workspace: JString<'local>,
+    card: JString<'local>,
 ) -> jlong {
     let result = (|| -> Result<jlong, String> {
         let selection = serde_json::from_str(&read_string(&mut env, &json)?)
             .map_err(|error| error.to_string())?;
         let workspace = read_string(&mut env, &workspace)?;
-        start_selection(selection, (!workspace.is_empty()).then(|| path(workspace)))
+        let card = read_string(&mut env, &card)?;
+        start_selection(selection, (!workspace.is_empty()).then(|| path(workspace)),
+            (!card.is_empty()).then(|| path(card)))
     })();
     match result {
         Ok(handle) => handle,
@@ -336,7 +339,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStart<'local>(
             read_string(&mut env, &tfs)?,
             read_string(&mut env, &onenand)?,
         )?;
-        start_selection(paths.into(), None)
+        start_selection(paths.into(), None, None)
     })();
     match result {
         Ok(handle) => handle,

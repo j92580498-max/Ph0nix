@@ -179,7 +179,8 @@ impl PhoneLauncher {
         let options = k750_native::worker::HostOptions::discover(&self.root).ok().map(|mut options| {
             options.resume = self.config.resume; options
         });
-        match Worker::start_with_options(paths, options) {
+        let card = if paths.device == "k750i" { self.files.boot_card().map(std::path::Path::to_path_buf) } else { None };
+        match Worker::start_with_card(paths, options, None, card) {
             Ok(worker) => {
                 let diagnostics = worker.diagnostics.clone();
                 self.worker = Some(worker);

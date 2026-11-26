@@ -1,6 +1,6 @@
 // Derived from tayga16/SamsungE380-Emu; original Apache-2.0/MIT terms retained.
 use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{atomic::{AtomicBool, AtomicU32, Ordering}, mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -93,7 +93,6 @@ fn input_history_suffix(history: &VecDeque<String>) -> String {
 
 enum WorkerCommand {
     Keys(u32), SetPaused(bool), Stop,
-    InsertMemoryStick(PathBuf, mpsc::Sender<Result<(), String>>),
 }
 
 pub struct Worker {
@@ -105,7 +104,7 @@ pub struct Worker {
     pub audio: AudioBuffer,
     pub diagnostics: DiagnosticsHandle,
     pub files: PhoneFiles,
-    card: Option<Arc<Mutex<Option<PathBuf>>>>,
+    card: Option<PathBuf>,
 }
 
 impl Worker {
@@ -114,13 +113,16 @@ impl Worker {
     }
 
     pub fn start_with_options(paths: impl Into<FirmwareSelection>, options: Option<HostOptions>) -> std::io::Result<Self> {
-        Self::start_in_workspace(paths, options, None)
+        Self::start_with_card(paths, options, None, None)
     }
 
-    pub fn start_in_workspace(paths: impl Into<FirmwareSelection>, options: Option<HostOptions>,
-        workspace: Option<std::path::PathBuf>,
+    pub fn start_with_card(paths: impl Into<FirmwareSelection>, options: Option<HostOptions>,
+        workspace: Option<PathBuf>, card: Option<PathBuf>,
     ) -> std::io::Result<Self> {
         let paths = paths.into();
+        if card.is_some() && paths.device != "k750i" {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Select the K750i to use a Memory Stick"));
+        }
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let (sender, events) = event_channel();
@@ -132,7 +134,6 @@ impl Worker {
         let worker_diagnostics = diagnostics.clone();
         let files = PhoneFiles::default();
         let worker_files = files.clone();
-        let card = (paths.device == "k750i").then(|| Arc::new(Mutex::new(None)));
         let worker_card = card.clone();
         let handle = std::thread::Builder::new().name("phone-firmware".into()).spawn(move || {
             // Unicorn owns Rc state and must be constructed inside this thread.
@@ -150,8 +151,8 @@ impl Worker {
                         Some(directory) => db2010_host::prepare::prepare_locked_at(&paths.files.image, fs, &directory)?,
                         None => db2010_host::prepare::prepare_locked(&paths.files.image, fs, &options.data_dir)?,
                     };
-                    let mut session = Session::start_prepared_with_services_and_diagnostics(&options, prepared,
-                        worker_audio, worker_files.clone(), worker_diagnostics.clone())?;
+                    let mut session = Session::start_prepared_with_card(&options, prepared,
+                        worker_audio, worker_files.clone(), worker_diagnostics.clone(), worker_card.as_deref())?;
                     let result = (|| -> anyhow::Result<()> {
                         let mut due = Instant::now();
                         let mut status_due = due;
@@ -178,15 +179,6 @@ impl Worker {
                                     } else {
                                         pending_input = Some(WorkerCommand::Keys(keys));
                                     }
-                                }
-                                Some(WorkerCommand::InsertMemoryStick(path, reply)) => {
-                                    let result = session.insert_memory_stick(&path).map_err(|error| format!("{error:#}"));
-                                    if result.is_ok() {
-                                        if let Some(card) = &worker_card {
-                                            *card.lock().unwrap_or_else(|error| error.into_inner()) = Some(path);
-                                        }
-                                    }
-                                    let _ = reply.send(result);
                                 }
                                 Some(WorkerCommand::Stop) => break,
                                 _ => {}
@@ -370,18 +362,7 @@ impl Worker {
         let _ = self.input.send(WorkerCommand::Keys(keys));
     }
 
-    pub fn supports_memory_stick(&self) -> bool { self.card.is_some() }
-
-    pub fn inserted_memory_stick(&self) -> Option<PathBuf> {
-        self.card.as_ref().and_then(|card| card.lock().unwrap_or_else(|error| error.into_inner()).clone())
-    }
-
-    pub fn insert_memory_stick(&self, path: PathBuf) -> Result<mpsc::Receiver<Result<(), String>>, String> {
-        if !self.supports_memory_stick() { return Err("Select the K750i to use a Memory Stick".into()); }
-        let (tx, rx) = mpsc::channel();
-        self.input.send(WorkerCommand::InsertMemoryStick(path, tx)).map_err(|_| "The phone has stopped".to_owned())?;
-        Ok(rx)
-    }
+    pub fn inserted_memory_stick(&self) -> Option<&Path> { self.card.as_deref() }
 
     pub fn set_paused(&self, paused: bool) {
         if paused { self.last_input.store(0, Ordering::Relaxed); }
@@ -410,7 +391,7 @@ mod tests {
         let worker = Worker { input, last_input: AtomicU32::new(u32::MAX),
             stop: Arc::new(AtomicBool::new(false)), handle: None, events,
             audio: AudioBuffer::default(), diagnostics: DiagnosticsHandle::default(),
-            files: PhoneFiles::default() };
+            files: PhoneFiles::default(), card: None };
         for key in [Right, Star, Left, Left, Star, Left, Star, Star, Hash, Zero, Six, Hash] {
             worker.set_phone_keys(key.bit());
             worker.set_phone_keys(key.bit()); // A held contact has no second edge.

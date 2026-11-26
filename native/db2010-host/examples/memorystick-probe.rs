@@ -2,7 +2,7 @@
 //! Exercise a persistent Memory Stick through stock K750i R1DB001 and UART OBEX.
 use anyhow::{bail, ensure, Context, Result};
 use db2010_host::{
-    prepare,
+    prepare, HostOptions,
     qmp::Session,
     storage::{CardImage, FileEntry, FileRequest},
 };
@@ -28,9 +28,12 @@ fn require_running(session: &mut Session) -> Result<()> {
     Ok(())
 }
 
-fn boot(engine: &Path, state: &Path, card: &CardImage, first: bool) -> Result<Session> {
+fn boot(options: &HostOptions, prepared: prepare::Prepared, card: &CardImage, first: bool) -> Result<Session> {
     println!("Starting {} K750i boot", if first { "first" } else { "cold" });
-    let mut session = Session::open_with_memory_stick(engine, state, card.path())?;
+    let mut session = Session::start_prepared_with_card(
+        options, prepared, Default::default(), Default::default(), Default::default(), Some(card.path()),
+    )?;
+    ensure!(!session.will_save_checkpoint(options.resume), "A card session must cold boot next time");
     let lock_error = card.info().expect_err("Host opened the image while the engine held it");
     ensure!(lock_error.to_string().contains("in use"), "Unexpected image error: {lock_error:#}");
     let mut last = Value::Null;
@@ -153,8 +156,9 @@ fn main() -> Result<()> {
         .try_into()
         .ok()
         .context("Usage: memorystick-probe ENGINE WORKSPACE MAIN FS")?;
-    let state = prepare::prepare_locked_at(&main, &fs_image, &workspace)?.state;
+    fs::create_dir_all(&workspace)?;
     let workspace = workspace.canonicalize()?;
+    let options = HostOptions { engine, data_dir: workspace.clone(), resume: true };
     let card = CardImage::create(&workspace.join("card.img"), 32)?;
     let other = vec!["MSSEMC".into(), "Media files".into(), "other".into()];
     for depth in 1..=other.len() {
@@ -168,7 +172,8 @@ fn main() -> Result<()> {
     let write_host = workspace.join("write-input.txt");
     fs::write(&write_host, &written)?;
 
-    let mut session = boot(&engine, &state, &card, true)?;
+    let prepared = prepare::prepare_locked_at(&main, &fs_image, &workspace)?;
+    let mut session = boot(&options, prepared, &card, true)?;
     let folder = find_card_folder(&mut session)?;
     export(&mut session, [folder.clone(), vec![SEED.into()]].concat(), workspace.join("readback.txt"), &seed)?;
     let path = [folder.clone(), vec![WRITTEN.into()]].concat();
@@ -178,14 +183,15 @@ fn main() -> Result<()> {
     println!("After firmware write: {status}");
     // A connected card has its own state and must survive a normal stop
     // even when the launcher is configured to resume the phone session.
-    session.save_with_resume(true)?;
+    session.save_with_resume(options.resume)?;
     drop(session);
 
     let raw_readback = workspace.join("image-readback.txt");
     card.export_file(&[other, vec![WRITTEN.into()]].concat(), &raw_readback, false)?;
     ensure!(fs::read(raw_readback)? == written, "Firmware write did not persist in the card image");
     ensure!(!workspace.join("phone.saved.json").exists(), "Unexpected checkpoint in a cold-boot test");
-    let mut session = boot(&engine, &state, &card, false)?;
+    let prepared = prepare::prepare_locked_at(&main, &fs_image, &workspace)?;
+    let mut session = boot(&options, prepared, &card, false)?;
     export(&mut session, path, workspace.join("cold-readback.txt"), &written)?;
     println!("Memory Stick read, write and cold-boot persistence passed");
     Ok(())

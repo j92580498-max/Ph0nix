@@ -201,7 +201,7 @@ fn decode_lcd_hex(hex:&str) -> Result<Vec<u8>> {
 
 impl Session {
     pub fn start(options:&HostOptions,prepared:&Path) -> Result<Self> {
-        Self::start_with_lease(options,prepared,None,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default())
+        Self::start_with_lease(options,prepared,None,None,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default())
     }
     pub fn start_prepared(options:&HostOptions,prepared:crate::prepare::Prepared) -> Result<Self> {
         Self::start_prepared_with_audio(options,prepared,AudioBuffer::default())
@@ -216,17 +216,20 @@ impl Session {
         Self::start_prepared_with_services_and_diagnostics(options,prepared,audio,files,DiagnosticsHandle::default())
     }
     pub fn start_prepared_with_services_and_diagnostics(options:&HostOptions,prepared:crate::prepare::Prepared,audio:AudioBuffer,files:PhoneFiles,diagnostics:DiagnosticsHandle) -> Result<Self> {
-        Self::start_with_lease(options,&prepared.state,Some(prepared.lease),audio,diagnostics,files)
+        Self::start_prepared_with_card(options,prepared,audio,files,diagnostics,None)
+    }
+    pub fn start_prepared_with_card(options:&HostOptions,prepared:crate::prepare::Prepared,audio:AudioBuffer,files:PhoneFiles,diagnostics:DiagnosticsHandle,card:Option<&Path>) -> Result<Self> {
+        Self::start_with_lease(options,&prepared.state,Some(prepared.lease),card,audio,diagnostics,files)
     }
     pub fn open_prepared(engine:&Path,prepared:crate::prepare::Prepared,checkpoint:&Path) -> Result<Self> {
         Self::open_with_lease(engine,&prepared.state,Some(checkpoint),None,prepared.lease,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default())
     }
-    fn start_with_lease(options:&HostOptions,prepared:&Path,lease:Option<fs::File>,audio:AudioBuffer,diagnostics:DiagnosticsHandle,files:PhoneFiles) -> Result<Self> {
+    fn start_with_lease(options:&HostOptions,prepared:&Path,lease:Option<fs::File>,card:Option<&Path>,audio:AudioBuffer,diagnostics:DiagnosticsHandle,files:PhoneFiles) -> Result<Self> {
         let workspace=prepared.parent().context("prepared state directory")?;
         let lease=match lease {Some(lease)=>lease,None=>Self::lock(workspace)?};
         let mut checkpoint=None;
         let mut state:Value=serde_json::from_slice(&fs::read(prepared)?)?;
-        if options.resume {
+        if options.resume && card.is_none() {
             let metadata=workspace.join("phone.saved.json");
             if metadata.is_file() {
                 let saved=read_checkpoint(&metadata)?;
@@ -248,7 +251,7 @@ impl Session {
         let temporary=workspace.join("state.json.pending");
         fs::write(&temporary,serde_json::to_vec_pretty(&state)?)?;
         atomic_replace(&temporary,prepared)?;
-        Self::open_with_lease(&options.engine,prepared,checkpoint.as_deref(),None,lease,audio,diagnostics,files)
+        Self::open_with_lease(&options.engine,prepared,checkpoint.as_deref(),card,lease,audio,diagnostics,files)
     }
     fn lock(workspace:&Path) -> Result<fs::File> {
         let file=fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
@@ -259,10 +262,6 @@ impl Session {
     pub fn open(engine:&Path,prepared:&Path,checkpoint:Option<&Path>) -> Result<Self> {
         let lease=Self::lock(prepared.parent().context("prepared state directory")?)?;
         Self::open_with_lease(engine,prepared,checkpoint,None,lease,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default())
-    }
-    pub fn open_with_memory_stick(engine:&Path,prepared:&Path,card:&Path) -> Result<Self> {
-        let lease=Self::lock(prepared.parent().context("prepared state directory")?)?;
-        Self::open_with_lease(engine,prepared,None,Some(card),lease,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default())
     }
     fn open_with_lease(engine:&Path,prepared:&Path,checkpoint:Option<&Path>,card:Option<&Path>,lease:fs::File,audio:AudioBuffer,diagnostics:DiagnosticsHandle,files:PhoneFiles) -> Result<Self> {
         ensure!(engine.is_file(),"Native DB2010 engine is missing: {}",engine.display());
@@ -381,18 +380,13 @@ impl Session {
         self.diagnostics.record_frame_decode(decode_start.elapsed());
         Ok(Some(frame))
     }
-    pub fn insert_memory_stick(&mut self,path:&Path) -> Result<()> {
-        ensure!(!self.card_inserted,"Stop the phone before changing its Memory Stick");
-        ensure!(self.running()?,"Start or resume the phone before inserting its Memory Stick");
-        self.attach_memory_stick(path)
-    }
     fn attach_memory_stick(&mut self,path:&Path) -> Result<()> {
         let card=CardImage::open(path)?;
         let absolute=card.path().canonicalize()?;
         let name=absolute.to_str().context("Memory Stick image path is not UTF-8")?;
         self.qmp.execute("qom-set",json!({"path":"/machine","property":"memorystick-image","value":name}))?;
         self.card_inserted=true;
-        self.diagnostics.log("info","storage",format!("Inserted Memory Stick: {}",absolute.display()));
+        self.diagnostics.log("info","storage",format!("Booting with Memory Stick: {}",absolute.display()));
         Ok(())
     }
     pub fn will_save_checkpoint(&self,resume:bool) -> bool {

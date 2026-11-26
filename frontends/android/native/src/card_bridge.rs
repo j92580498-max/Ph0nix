@@ -16,8 +16,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCardRequest<'loc
             CardImage::create(&image, request["size_mib"].as_u64().unwrap_or(64))
         } else { CardImage::open(&image) }.map_err(|e| format!("{e:#}"))?;
         let mut path = Vec::new();
-        if operation == "mount" { card.mount_in_phone().map_err(|e| e.to_string())?; }
-        else if !matches!(operation.as_str(), "info" | "create") {
+        if !matches!(operation.as_str(), "info" | "create") {
             request.as_object_mut().ok_or("Invalid card request")?.remove("image");
             let action: FileRequest = serde_json::from_value(request).map_err(|e| e.to_string())?;
             let result = match action {
@@ -51,7 +50,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCardRequest<'loc
         let entries = card.list(&path).map_err(|e| format!("{e:#}"))?;
         let info = card.info().map_err(|e| format!("{e:#}"))?;
         Ok(json!({"info":info,"snapshot":{"attached":true,"connected":true,"busy":false,"path":path,"entries":entries,
-            "notice":"Image files. Mounting this image in the K750i requires its Memory Stick controller.","job":null}}))
+            "notice":"Image files. Choose this image before starting K750i to use it in the phone.","job":null}}))
     })();
     let response = match result { Ok(value) => value, Err(error) => json!({"error":error}) };
     new_string(&mut env, &response.to_string())

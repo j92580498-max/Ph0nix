@@ -94,8 +94,9 @@ This bridge does not emulate the firmware's UART3 Bluetooth controller.
 **Card images** creates and browses raw FAT16 images from 16 to 1024 MiB. Android
 can import/export image files with the document picker. The image filesystem
 supports folders, copy/move, import/export and deletion without loading the
-whole disk into memory. **Mounting an image in K750i firmware remains unfinished**:
-the phone uses Memory Stick Duo and its card controller is not implemented.
+whole disk into memory. The experimental K750i Memory Stick PRO Duo model uses
+these same images. Choose an image before starting the phone; see [storage.md](storage.md)
+for the image format and compatibility checks.
 
 ## Linux
 

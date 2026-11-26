@@ -17,7 +17,7 @@ internal object NativeBridge {
     external fun nativeTransferInternalMemory(
         selection: String, dataDirectory: String, workspace: String, file: String, importing: Boolean,
     ): String
-    external fun nativeStartSelection(selection: String, workspace: String): Long
+    external fun nativeStartSelection(selection: String, workspace: String, card: String): Long
     external fun nativePollStatus(handle: Long): String
     external fun nativeTakeFrame(handle: Long): ByteArray?
     external fun nativeTakeAudio(handle: Long): ByteArray?

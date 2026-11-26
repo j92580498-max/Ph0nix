@@ -1,5 +1,6 @@
 name: K750i Android APK
 on:
+  workflow_call:
   push:
     branches: [test/k750i-internal-storage]
     paths:
