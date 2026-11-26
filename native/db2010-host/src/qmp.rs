@@ -490,6 +490,24 @@ impl Session {
         self.last_panel=None;
         Ok(())
     }
+    /// Save only committed flash after a rejected PMIC write. The faulted VM
+    /// and a potentially interrupted file transfer must never be resumed.
+    pub fn recover_internal_memory_after_pmic_stop(&mut self) -> Result<bool> {
+        let status=self.qmp.execute("query-status",json!({}))?;
+        if status["status"]!="debug" { return Ok(false); }
+        let summary=self.summary()?;
+        let stop=&summary["stop"];
+        if stop["reason"]!="i2c_extra_write_value_unmodeled" ||
+            !matches!(stop["address"].as_u64(),Some(0xf9040000|0xf9040002)) {
+            return Ok(false);
+        }
+        ensure!(!self.files.snapshot().busy,
+            "A phone file transfer was interrupted; the previous saved memory was kept");
+        self.pack_internal_memory()?.publish(&self.workspace)?;
+        remove_old_checkpoint(&self.workspace);
+        self.diagnostics.log("info","storage","Internal memory saved after the PMIC stop; the next launch will cold boot.");
+        Ok(true)
+    }
     fn save_phone(&mut self, resume:bool) -> Result<()> {
         // An OBEX session is host state, not checkpoint state. Finish its
         // queued operation and return firmware to AT mode while the VM can
@@ -500,13 +518,7 @@ impl Session {
         self.qmp.execute("stop",json!({}))?;
         ensure!(self.summary()?["stop"].is_null(),
             "Firmware stopped with an error; the previous saved phone state was kept");
-        let export=crate::flash::FlashExport::new(&self.workspace)?;
-        // Raw images total almost 64 MiB. Allow slower phone storage more
-        // time than the normal five-second observation deadline.
-        self.qmp.execute_with_timeout("qom-set",json!({"path":"/machine","property":"flash-byte-export",
-            "value":export.path()}),Duration::from_secs(30)).context("Saving internal K750 storage")?;
-        let memory=PendingMemory::pack(&self.workspace,export.path())?;
-        drop(export);
+        let memory=self.pack_internal_memory()?;
         if !resume {
             memory.publish(&self.workspace)?;
             remove_old_checkpoint(&self.workspace);
@@ -546,6 +558,14 @@ impl Session {
         sync_directory(&self.workspace).context("Synchronizing phone checkpoint directory")?;
         if let Some(previous)=previous { remove_checkpoint_files(&self.workspace,previous); }
         Ok(())
+    }
+    fn pack_internal_memory(&mut self) -> Result<PendingMemory> {
+        let export=FlashExport::new(&self.workspace)?;
+        // Raw images total almost 64 MiB. Allow slower phone storage more
+        // time than the normal five-second observation deadline.
+        self.qmp.execute_with_timeout("qom-set",json!({"path":"/machine","property":"flash-byte-export",
+            "value":export.path()}),Duration::from_secs(30)).context("Saving internal K750 storage")?;
+        PendingMemory::pack(&self.workspace,export.path())
     }
 }
 fn read_checkpoint(metadata:&Path) -> Result<SavedCheckpoint> {
@@ -608,6 +628,32 @@ impl Drop for Session {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires the built DB2010 engine and a generated PMIC fixture"]
+    fn saves_committed_flash_after_pmic_fault() -> Result<()> {
+        let engine = std::env::var("PH0NIX_TEST_ENGINE")?;
+        let state = std::env::var("PH0NIX_PMIC_FIXTURE")?;
+        let state = Path::new(&state);
+        let workspace = state.parent().context("fixture directory")?;
+        let mut session = Session::open(Path::new(&engine), state, None)?;
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while session.running()? {
+            ensure!(Instant::now() < deadline, "PMIC fixture did not stop");
+            thread::sleep(Duration::from_millis(10));
+        }
+        let stop = session.summary()?["stop"].clone();
+        assert_eq!(stop["reason"], "i2c_extra_write_value_unmodeled", "{stop}");
+        assert_eq!(stop["address"], 0xf9040000u32, "{stop}");
+        let log = fs::read_to_string(workspace.join("engine.log"))?;
+        assert!(log.contains("PMIC register 0xa0, value 0x2e"), "{log}");
+        assert!(session.save_with_resume(false).is_err());
+        assert!(session.recover_internal_memory_after_pmic_stop()?);
+        let export = flash::unpack_memory(workspace, &workspace.join(MEMORY_FILE))?;
+        let gdfs = fs::read(export.path().join("gdfs.bin"))?;
+        assert_eq!(&gdfs[..4], &[0x34, 0x12, 0xff, 0xff]);
+        Ok(())
+    }
 
     #[test]
     fn legacy_saved_checkpoint_without_flash_still_loads() {

@@ -40,6 +40,6 @@ internal object NativeBridge {
     external fun nativeCardRequest(request: String): String
     external fun nativeIsRunning(handle: Long): Boolean
     external fun nativeSetPaused(handle: Long, paused: Boolean)
-    external fun nativeStop(handle: Long)
+    external fun nativeStop(handle: Long): String
     external fun nativeDestroy(handle: Long)
 }

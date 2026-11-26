@@ -30,12 +30,16 @@ jobs:
         run: |
           python3 -m venv build/k750i-test-tools
           tools="$PWD/build/k750i-test-tools/bin"
-          "$tools/python" -m pip install meson==1.11.1
+          "$tools/python" -m pip install meson==1.11.1 pytest==8.4.2
           export PATH="$tools:$PATH"
           if ! "$tools/python" -m db2010.development.build --configure --jobs 2; then
             find build/provenance/qemu -type f -name build.log -exec tail -n 80 {} \; || true
             exit 1
           fi
+      - name: Verify that a rejected PMIC write leaves committed flash recoverable
+        run: |
+          build/k750i-test-tools/bin/python -m pytest -q \
+            tests/test_pmic_vibrator.py::test_pmic_fault_preserves_committed_internal_storage
       - name: Verify K750i internal storage across a cold boot
         run: |
           work="$(mktemp -d "$RUNNER_TEMP/ph0nix-k750i.XXXXXXXX")"

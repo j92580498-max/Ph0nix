@@ -575,6 +575,13 @@
         "hw/arm/db2010-simple.c": "6b9109057fd421d48d5176f154b9064e0ddf2ec0f426492963fa3fa8e4a1cdaa",
         "hw/arm/db2010-time.c": "c910a056dc75af81b57a6a82e03f6b62d7da9b004d1f092e8f6bdfce4eaae008"
       }
+    },
+    {
+      "path": "patches/0010-ph0nix-pmic-fault-report.patch",
+      "sha256": "d39607608200d800511ff6fab6a01f4e4c00129406f8a42c7b9e66e1d9928d4f",
+      "files": {
+        "hw/arm/db2010-i2c.c": "41fd888d05994b391428fd108925a93d06a658bc4c0517b4561f40af5297279c"
+      }
     }
   ],
   "original_fork_commit": "0e1b026cf74a271e04fecc8922998885e6c9181c"

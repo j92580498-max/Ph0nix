@@ -14,6 +14,7 @@ struct Session {
     frame: Option<GuestFrame>,
     status: String,
     finished: bool,
+    failed: bool,
 }
 
 enum GuestFrame { Rgb(Frame), Rgb565(LcdFrame) }
@@ -66,6 +67,7 @@ fn start_selection(selection: FirmwareSelection, workspace: Option<PathBuf>) -> 
         frame: None,
         status: format!("Starting {name} firmware…"),
         finished: false,
+        failed: false,
     }))) as jlong)
 }
 
@@ -355,6 +357,11 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativePollStatus<'loca
         return new_string(&mut env, "Emulator is not running.");
     };
     let mut session = session.lock().unwrap_or_else(|error| error.into_inner());
+    poll_worker(&mut session);
+    new_string(&mut env, &session.status)
+}
+
+fn poll_worker(session: &mut Session) {
     loop {
         match session.worker.events.try_recv() {
             Ok(WorkerEvent::Frame(frame)) => {
@@ -367,6 +374,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativePollStatus<'loca
             Ok(WorkerEvent::Status(status)) => if !session.finished {session.status=status;},
             Ok(WorkerEvent::InputApplied(_)) => {}
             Ok(WorkerEvent::Finished(status)) => {
+                session.failed = status.is_err();
                 session.status = status.unwrap_or_else(|error| error);
                 session.finished = true;
                 break;
@@ -375,13 +383,13 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativePollStatus<'loca
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 if !session.finished {
                     session.status = "Emulator worker stopped unexpectedly.".into();
+                    session.failed = true;
                     session.finished = true;
                 }
                 break;
             }
         }
     }
-    new_string(&mut env, &session.status)
 }
 
 #[no_mangle]
@@ -466,19 +474,16 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeSetPaused(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStop(
-    _env: JNIEnv<'_>,
-    _this: JObject<'_>,
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStop<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
     handle: jlong,
-) {
-    if let Some(session) = session(handle) {
-        let mut session = session.lock().unwrap_or_else(|error| error.into_inner());
-        session.worker.stop();
-        session.finished = true;
-        if session.status.starts_with("Running") || session.status.starts_with("Starting") {
-            session.status = "Stopped.".into();
-        }
-    }
+) -> jstring {
+    let Some(session) = session(handle) else { return new_string(&mut env, ""); };
+    let mut session = session.lock().unwrap_or_else(|error| error.into_inner());
+    session.worker.stop();
+    poll_worker(&mut session);
+    new_string(&mut env, if session.failed { &session.status } else { "" })
 }
 
 #[no_mangle]

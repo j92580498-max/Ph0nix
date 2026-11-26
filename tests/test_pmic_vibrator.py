@@ -4,7 +4,7 @@ import subprocess
 import pytest
 
 from support.component_test import ROOT, component_inputs
-from support.fixtures import qemu_run
+from support.fixtures import qemu_run, freeze_state, words
 from support.i2c_interleave_fixtures import state, write, read
 
 
@@ -98,3 +98,26 @@ def test_native_vibrator_readback_requires_explicit_contract(tmp_path):
     result=qemu_run(configured(write(0xa0,0x2a)+read(0xa0)),tmp_path/'implicit',trace=False)
     assert result['stop']['reason']=='i2c_extra_write_value_unmodeled'
     assert result['i2c']['last_write_registers']['a0']==0x2a
+
+
+def test_pmic_fault_preserves_committed_internal_storage(tmp_path, monkeypatch):
+    from test_flash import storage_state
+
+    spec = configured(write(0xa0, 0x2a) + write(0xa0, 0x2e))
+    # Prefix the I2C program with a NOR program command and its data word.
+    # The literal loads in both programs are PC-relative.
+    code = b''.join(words(0xe59f0008, 0xe59f1008, 0xe1c100b0, 0xea000001, data, address)
+                    for address, data in ((0x45f00000, 0x40), (0x45f00000, 0x1234)))
+    region = spec['regions'][0]
+    region['seeds'][0]['data'] = code + region['seeds'][0]['data']
+    region['size'] = (len(region['seeds'][0]['data']) + 4095) & ~4095
+    spec['executable_ranges'][0]['end'] += len(code)
+    spec['instruction_limit'] += 8
+    storage = storage_state(tmp_path)
+    spec['regions'] += storage['regions'][1:]
+    spec.update(nor_model=storage['nor_model'], nand=storage['nand'])
+    monkeypatch.setenv('PH0NIX_TEST_ENGINE', str(ROOT/'qemu/build/qemu-system-arm'))
+    monkeypatch.setenv('PH0NIX_PMIC_FIXTURE', str(freeze_state(spec, tmp_path)))
+    subprocess.run(['cargo', 'test', '--locked', '-p', 'db2010-host',
+                    'saves_committed_flash_after_pmic_fault', '--', '--ignored', '--nocapture'],
+                   cwd=ROOT, check=True)

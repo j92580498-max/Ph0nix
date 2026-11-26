@@ -1,0 +1,28 @@
+diff --git a/hw/arm/db2010-i2c.c b/hw/arm/db2010-i2c.c
+--- a/hw/arm/db2010-i2c.c
++++ b/hw/arm/db2010-i2c.c
+@@ -1,5 +1,6 @@
+ /* Compiled DB2010 component. SPDX-License-Identifier: GPL-2.0-or-later */
+ #include "qemu/osdep.h"
++#include "qemu/error-report.h"
+ #include "qemu/bswap.h"
+ #include "qobject/qdict.h"
+ #include "qobject/qlist.h"
+@@ -503,8 +504,15 @@
+     DB2010Pmic pmic = *i2c->pmic;
+     DB2010FmRadio fm = *i2c->fm;
+     preview.pmic = &pmic; preview.fm = &fm;
+-    return dbi_access(a->commit ? i2c : &preview, a->address, a->size,
+-                      a->now, a->write, &a->value);
++    const char *fault = dbi_access(a->commit ? i2c : &preview, a->address,
++                                  a->size, a->now, a->write, &a->value);
++    if (!a->commit && fault && !strcmp(fault, "i2c_extra_write_value_unmodeled")) {
++        /* Report the rejected request from the preview, without applying it. */
++        int data = preview.state.staged >= 0 ? preview.state.staged : (int)a->value;
++        error_report("%s: PMIC register 0x%02x, value 0x%02x, MMIO 0x%08x",
++                     fault, (unsigned)pmic.state.extra_reg, (unsigned)data, a->address);
++    }
++    return fault;
+ }
+ 
+ void dbi_export(DB2010I2c *model, QDict *snapshot)

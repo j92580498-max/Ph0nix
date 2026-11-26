@@ -18,6 +18,7 @@ import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.addCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.view.ViewCompat
@@ -63,6 +64,10 @@ class EmulatorActivity : AppCompatActivity() {
     private var sentMask = 0
     private var foreground = false
     private var sessionStarting = false
+    private var sessionStopped = false
+    private var stopPending = false
+    private var leaving = false
+    private var lastDiagnostics: JSONObject? = null
     private var fullscreen = false
     private var bindings = emptyList<Binding>()
     private var developerPanel: DeveloperPanel? = null
@@ -224,7 +229,8 @@ class EmulatorActivity : AppCompatActivity() {
         lcd.showFps = preferences.showFps
         applySystemInsets()
         fullscreenButton.setOnClickListener { setFullscreen(!fullscreen) }
-        findViewById<View>(R.id.btn_back).setOnClickListener { finish() }
+        findViewById<View>(R.id.btn_back).setOnClickListener { leaveEmulator() }
+        onBackPressedDispatcher.addCallback(this) { leaveEmulator() }
         lcd.setOnClickListener { if (fullscreen) setFullscreen(false) }
         setFullscreen(savedInstanceState?.getBoolean("fullscreen") ?: preferences.fullscreen)
         if (selection.isBlank()) finish()
@@ -234,7 +240,7 @@ class EmulatorActivity : AppCompatActivity() {
         super.onResume()
         foreground = true
         root.keepScreenOn = preferences.keepAwake
-        if (selection.isBlank()) return
+        if (selection.isBlank() || sessionStopped) return
         if (sessionStarting || sessionHandle.get() != 0L) {
             setSessionPaused(false)
             startAudio(generation.get())
@@ -351,10 +357,8 @@ class EmulatorActivity : AppCompatActivity() {
                 return@execute
             }
             sessionHandle.set(handle)
-            if (generation.get() != token) {
-                if (sessionHandle.compareAndSet(handle, 0)) stopAndDestroy(handle)
-                return@execute
-            }
+            // A stop requested during startup is queued behind this task.
+            if (generation.get() != token) return@execute
             diagnosticsDueNs = 0L
             audioProblem?.let { NativeBridge.nativeLog(handle, "error", "android-audio", it) }
             runOnUiThread {
@@ -418,22 +422,54 @@ class EmulatorActivity : AppCompatActivity() {
         }
     }
 
+    private fun leaveEmulator() {
+        if (leaving) return
+        if (sessionStopped && !stopPending) {
+            finish()
+            return
+        }
+        leaving = true
+        if (fullscreen) setFullscreen(false)
+        status.text = "Saving phone memory?"
+        stopSession()
+    }
+
     private fun stopSession() {
+        if (sessionStopped) return
+        sessionStopped = true
+        stopPending = true
         releaseKeys()
-        generation.incrementAndGet()
+        val token = generation.incrementAndGet()
         sessionStarting = false
         lcd.setRunning(false)
         lcd.onPresentationFrame = null
-        val handle = sessionHandle.getAndSet(0)
+        waiting.visibility = View.GONE
         activeFile?.let {
             filePanel?.message("Transfer interrupted while the phone was stopped. Retry after it resumes.")
             activeFile = null; activeFileId = 0L
         }
         audioPlayer?.close()
         audioPlayer = null
-        if (handle != 0L) {
-            val stoppedGeneration = generation.get()
-            nativeExecutor.execute { stopAndDestroy(handle, stoppedGeneration) }
+        nativeExecutor.execute {
+            val handle = sessionHandle.getAndSet(0)
+            val (error, report) = if (handle != 0L) stopAndDestroy(handle) else Pair(null, null)
+            runOnUiThread {
+                stopPending = false
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                report?.let { showDiagnostics(it, token, 0) }
+                if (error != null) {
+                    if (fullscreen) setFullscreen(false)
+                    status.text = error
+                    if (leaving) {
+                        MaterialAlertDialogBuilder(this)
+                            .setTitle("The phone stopped with an error")
+                            .setMessage(error)
+                            .setPositiveButton("OK", null)
+                            .show()
+                    }
+                    leaving = false
+                } else if (leaving) finish()
+            }
         }
     }
 
@@ -441,7 +477,10 @@ class EmulatorActivity : AppCompatActivity() {
         releaseKeys()
         val token = generation.get()
         val handle = sessionHandle.get()
-        if (handle == 0L) return
+        if (sessionStopped || handle == 0L) {
+            lastDiagnostics?.let { showDiagnostics(it, token, 0, open = true) }
+            return
+        }
         nativeExecutor.execute {
             if (generation.get() == token && sessionHandle.get() == handle) {
                 NativeBridge.nativeSetDeveloperMode(handle, true)
@@ -454,13 +493,14 @@ class EmulatorActivity : AppCompatActivity() {
         }
     }
 
-    private fun showDiagnostics(snapshot: JSONObject, token: Long, handle: Long) {
+    private fun showDiagnostics(snapshot: JSONObject, token: Long, handle: Long, open: Boolean = false) {
+        lastDiagnostics = snapshot
         if (developerPanel?.isShowing == true) {
             developerPanel?.update(snapshot)
-        } else if (snapshot.optBoolean("developer_mode")) {
+        } else if (open || (handle != 0L && snapshot.optBoolean("developer_mode"))) {
             releaseKeys()
             developerPanel = DeveloperPanel(this) {
-                if (generation.get() == token && sessionHandle.get() == handle) nativeExecutor.execute {
+                if (handle != 0L && generation.get() == token && sessionHandle.get() == handle) nativeExecutor.execute {
                     if (generation.get() == token && sessionHandle.get() == handle)
                         NativeBridge.nativeSetDeveloperMode(handle, false)
                 }
@@ -760,26 +800,20 @@ class EmulatorActivity : AppCompatActivity() {
 
     private data class PendingFile(val request: JSONObject, val completed: ((JSONObject) -> Unit)?)
 
-    private fun stopAndDestroy(handle: Long, reportGeneration: Long? = null) {
-        try {
+    private fun stopAndDestroy(handle: Long): Pair<String?, JSONObject?> {
+        val error = try {
             NativeBridge.nativeSetKeys(handle, 0)
-            NativeBridge.nativeStop(handle)
+            NativeBridge.nativeStop(handle).ifBlank { null }
         } catch (error: Throwable) {
             android.util.Log.e("ph0nix", "Stopping the phone failed", error)
-            runCatching { NativeBridge.nativeLog(handle, "error", "android", error.message ?: error.toString()) }
-        } finally {
-            // Stop joins the worker, including any pending checkpoint save.
-            // Capture late errors before releasing its diagnostic handle.
-            val diagnostic = if (reportGeneration != null)
-                runCatching { JSONObject(NativeBridge.nativeDiagnostics(handle)) }.getOrNull() else null
-            NativeBridge.nativeDestroy(handle)
-            diagnostic?.let { report ->
-                runOnUiThread {
-                    if (generation.get() == reportGeneration && !isFinishing && !isDestroyed)
-                        developerPanel?.update(report)
-                }
-            }
+            val message = error.message ?: error.toString()
+            runCatching { NativeBridge.nativeLog(handle, "error", "android", message) }
+            message
         }
+        // Stop joins the worker, including any memory save. Capture the final report first.
+        val diagnostic = runCatching { JSONObject(NativeBridge.nativeDiagnostics(handle)) }.getOrNull()
+        NativeBridge.nativeDestroy(handle)
+        return Pair(error, diagnostic)
     }
 
     private fun buildKeypad() {

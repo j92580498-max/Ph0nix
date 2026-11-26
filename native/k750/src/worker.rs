@@ -145,95 +145,104 @@ impl Worker {
                     };
                     let mut session = Session::start_prepared_with_services_and_diagnostics(&options, prepared,
                         worker_audio, worker_files.clone(), worker_diagnostics.clone())?;
-                    let mut due = Instant::now();
-                    let mut status_due = due;
-                    let mut input_due = due;
-                    let mut pending_input = None;
-                    let mut pause_requested = false;
-                    let mut paused = false;
-                    while !worker_stop.load(Ordering::Relaxed) {
-                        match pending_input.take().or_else(|| worker_input.try_recv().ok()) {
-                            Some(WorkerCommand::SetPaused(next)) => {
-                                pause_requested = next;
-                                if paused && !next {
-                                    session.resume()?;
-                                    paused = false;
-                                    due = Instant::now();
-                                    status_due = due;
-                                    input_due = due;
+                    let result = (|| -> anyhow::Result<()> {
+                        let mut due = Instant::now();
+                        let mut status_due = due;
+                        let mut input_due = due;
+                        let mut pending_input = None;
+                        let mut pause_requested = false;
+                        let mut paused = false;
+                        while !worker_stop.load(Ordering::Relaxed) {
+                            match pending_input.take().or_else(|| worker_input.try_recv().ok()) {
+                                Some(WorkerCommand::SetPaused(next)) => {
+                                    pause_requested = next;
+                                    if paused && !next {
+                                        session.resume()?;
+                                        paused = false;
+                                        due = Instant::now();
+                                        status_due = due;
+                                        input_due = due;
+                                    }
+                                }
+                                Some(WorkerCommand::Keys(keys)) if !paused => {
+                                    if Instant::now() >= input_due {
+                                        session.contacts(&crate::keys::qmp_contacts(keys))?;
+                                        input_due = Instant::now() + PRESENTATION_INTERVAL;
+                                    } else {
+                                        pending_input = Some(WorkerCommand::Keys(keys));
+                                    }
+                                }
+                                Some(WorkerCommand::Stop) => break,
+                                _ => {}
+                            }
+                            // Let an accepted file transfer finish; suspending the guest
+                            // midstream would time out the phone's live OBEX connection.
+                            if pause_requested && !paused && !worker_files.snapshot().busy {
+                                session.pause()?;
+                                paused = true;
+                            }
+                            if paused {
+                                // Wait for a command without polling the frozen guest.
+                                pending_input = worker_input.recv().ok();
+                                if pending_input.is_none() { break; }
+                                continue;
+                            }
+                            if worker_files.pending_commit() {
+                                worker_diagnostics.log("info", "checkpoint", "Saving imported file before completing its move.");
+                                if let Err(error) = session.save_with_resume(options.resume) {
+                                    worker_diagnostics.log("error", "files", format!("File move could not finish: {error:#}"));
+                                }
+                                session.resume_after_save()?;
+                                // Checkpoint time is an intentional pause, not a
+                                // rendering deadline miss or a backlog of polls.
+                                due = Instant::now();
+                                status_due = due;
+                            }
+                            if Instant::now() >= due {
+                                if let Some(frame) = session.frame()? {
+                                    if sender.send(WorkerEvent::Lcd(frame)).is_err() { break; }
+                                }
+                                let (_, missed) = poll_delay(&mut due, Instant::now());
+                                if missed != 0 { worker_diagnostics.record_missed_deadlines(missed); }
+                            }
+                            if Instant::now() >= status_due {
+                                let progress = session.progress()?;
+                                let status = format!("Running Sony Ericsson K750i · {:.1} s",
+                                    progress["virtual_ns"].as_u64().unwrap_or(0) as f64 / 1e9);
+                                if sender.send(WorkerEvent::Status(status)).is_err() { break; }
+                                if !progress["running"].as_bool().unwrap_or(false) {
+                                    let summary = session.summary()?;
+                                    let stop = &summary["stop"];
+                                    anyhow::bail!("Firmware stopped: {} at 0x{:08X}, PC=0x{:08X}",
+                                        stop["reason"].as_str().unwrap_or("engine paused"),
+                                        stop["address"].as_u64().unwrap_or(0), stop["pc"].as_u64().unwrap_or(0));
+                                }
+                                status_due = Instant::now() + Duration::from_millis(250);
+                            }
+                            let mut next_due = due.min(status_due);
+                            if pending_input.is_some() { next_due = next_due.min(input_due); }
+                            let delay = next_due.saturating_duration_since(Instant::now());
+                            if pending_input.is_some() {
+                                std::thread::sleep(delay);
+                            } else {
+                                match worker_input.recv_timeout(delay) {
+                                    Ok(command) => pending_input = Some(command),
+                                    Err(mpsc::RecvTimeoutError::Timeout) => {},
+                                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
                                 }
                             }
-                            Some(WorkerCommand::Keys(keys)) if !paused => {
-                                if Instant::now() >= input_due {
-                                    session.contacts(&crate::keys::qmp_contacts(keys))?;
-                                    input_due = Instant::now() + PRESENTATION_INTERVAL;
-                                } else {
-                                    pending_input = Some(WorkerCommand::Keys(keys));
-                                }
-                            }
-                            Some(WorkerCommand::Stop) => break,
-                            _ => {}
                         }
-                        // Let an accepted file transfer finish; suspending the guest
-                        // midstream would time out the phone's live OBEX connection.
-                        if pause_requested && !paused && !worker_files.snapshot().busy {
-                            session.pause()?;
-                            paused = true;
-                        }
-                        if paused {
-                            // Wait for a command without polling the frozen guest.
-                            pending_input = worker_input.recv().ok();
-                            if pending_input.is_none() { break; }
-                            continue;
-                        }
-                        if worker_files.pending_commit() {
-                            worker_diagnostics.log("info", "checkpoint", "Saving imported file before completing its move.");
-                            if let Err(error) = session.save_with_resume(options.resume) {
-                                worker_diagnostics.log("error", "files", format!("File move could not finish: {error:#}"));
-                            }
-                            session.resume_after_save()?;
-                            // Checkpoint time is an intentional pause, not a
-                            // rendering deadline miss or a backlog of polls.
-                            due = Instant::now();
-                            status_due = due;
-                        }
-                        if Instant::now() >= due {
-                            if let Some(frame) = session.frame()? {
-                                if sender.send(WorkerEvent::Lcd(frame)).is_err() { break; }
-                            }
-                            let (_, missed) = poll_delay(&mut due, Instant::now());
-                            if missed != 0 { worker_diagnostics.record_missed_deadlines(missed); }
-                        }
-                        if Instant::now() >= status_due {
-                            let progress = session.progress()?;
-                            let status = format!("Running Sony Ericsson K750i · {:.1} s",
-                                progress["virtual_ns"].as_u64().unwrap_or(0) as f64 / 1e9);
-                            if sender.send(WorkerEvent::Status(status)).is_err() { break; }
-                            if !progress["running"].as_bool().unwrap_or(false) {
-                                let summary = session.summary()?;
-                                let stop = &summary["stop"];
-                                anyhow::bail!("Firmware stopped: {} at 0x{:08X}, PC=0x{:08X}",
-                                    stop["reason"].as_str().unwrap_or("engine paused"),
-                                    stop["address"].as_u64().unwrap_or(0), stop["pc"].as_u64().unwrap_or(0));
-                            }
-                            status_due = Instant::now() + Duration::from_millis(250);
-                        }
-                        let mut next_due = due.min(status_due);
-                        if pending_input.is_some() { next_due = next_due.min(input_due); }
-                        let delay = next_due.saturating_duration_since(Instant::now());
-                        if pending_input.is_some() {
-                            std::thread::sleep(delay);
-                        } else {
-                            match worker_input.recv_timeout(delay) {
-                                Ok(command) => pending_input = Some(command),
-                                Err(mpsc::RecvTimeoutError::Timeout) => {},
-                                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                            }
+                        // A final save may need the running guest to disconnect its file service.
+                        if paused { session.resume()?; }
+                        session.save_with_resume(options.resume)
+                    })();
+                    if let Err(error) = result {
+                        match session.recover_internal_memory_after_pmic_stop() {
+                            Ok(true) => anyhow::bail!("{error:#}. Internal memory saved; the next launch will cold boot."),
+                            Ok(false) => return Err(error),
+                            Err(recovery) => anyhow::bail!("{error:#}. Could not recover internal memory: {recovery:#}"),
                         }
                     }
-                    // A final save may need the running guest to disconnect its file service.
-                    if paused { session.resume()?; }
-                    session.save_with_resume(options.resume)?;
                     return Ok(if options.resume { "Stopped. Phone session and internal storage saved." }
                         else { "Stopped. Internal storage saved." }.into());
                 }
