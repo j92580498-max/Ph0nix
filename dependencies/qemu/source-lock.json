@@ -582,6 +582,19 @@
       "files": {
         "hw/arm/db2010-i2c.c": "41fd888d05994b391428fd108925a93d06a658bc4c0517b4561f40af5297279c"
       }
+    },
+    {
+      "path": "patches/0011-ph0nix-memorystick-detect-probe.patch",
+      "sha256": "56f23bf330f6042475baf4ac657fbd4d8cc45d08829b0165f2dad6d7bebda509",
+      "files": {
+        "hw/arm/db2010-checkpoint.c": "c7cd51e15999da90f50d538d736c368d1555b166a978d7ffcfb07d485e88ccc3",
+        "hw/arm/db2010-components.h": "61db5a8ac8ff4dc13056a79d197ed747f434d378412ad005e7cbe62117e99e87",
+        "hw/arm/db2010-observe.c": "63d8c32e60d0cab71815d8409f51033c55909cd0615f09406f5065065c4da0b5",
+        "hw/arm/db2010-register-bank.c": "db15d78b5e149d8c2f2fd357025078c7d0c6fee2952666267f64954c17bf056b",
+        "hw/arm/db2010-timer.c": "6f9dae90061e61e95010a8b04de5f1d680fec459e4bf5c00dc0a7eb16fc4862c",
+        "hw/arm/db2010-timer.h": "ad904caf579dcfb0820e47d3f485a1a8d16479305e70ba6c2667fa233571ae11",
+        "hw/arm/db2010.c": "e03051641956e65da9e50cf3be6ee02f345e508427571ed8dd2a2d57fea0565f"
+      }
     }
   ],
   "original_fork_commit": "0e1b026cf74a271e04fecc8922998885e6c9181c"
