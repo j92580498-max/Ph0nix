@@ -456,6 +456,21 @@ impl Session {
             thread::sleep(Duration::from_millis(10));
         }
     }
+    pub fn pause(&mut self) -> Result<()> {
+        self.contacts(&[])?;
+        self.qmp.execute("stop", json!({}))?;
+        ensure!(self.summary()?["stop"].is_null(), "Firmware stopped with an error before pausing");
+        self.diagnostics.set_running(false);
+        Ok(())
+    }
+
+    pub fn resume(&mut self) -> Result<()> {
+        self.audio.discard_pending();
+        self.qmp.execute("cont", json!({}))?;
+        self.diagnostics.set_running(true);
+        Ok(())
+    }
+
     pub fn save(&mut self) -> Result<()> { self.save_with_resume(true) }
 
     pub fn save_with_resume(&mut self, resume:bool) -> Result<()> {

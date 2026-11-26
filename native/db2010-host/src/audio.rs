@@ -50,6 +50,11 @@ impl AudioBuffer {
         Self::observe(&queue);
         packet
     }
+    pub(crate) fn discard_pending(&self) {
+        let mut queue = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        Self::clear(&mut queue);
+        Self::observe(&queue);
+    }
     pub fn stats(&self) -> AudioStats {
         self.inner.lock().unwrap_or_else(|e| e.into_inner()).stats.clone()
     }

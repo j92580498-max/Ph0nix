@@ -457,6 +457,15 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeIsRunning(
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeSetPaused(
+    _env: JNIEnv<'_>, _this: JObject<'_>, handle: jlong, paused: jboolean,
+) {
+    if let Some(session) = session(handle) {
+        if let Ok(session) = session.lock() { session.worker.set_paused(paused != 0); }
+    }
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStop(
     _env: JNIEnv<'_>,
     _this: JObject<'_>,

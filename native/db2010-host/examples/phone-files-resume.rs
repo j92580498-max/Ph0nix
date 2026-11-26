@@ -194,6 +194,26 @@ fn assert_no_checkpoint(workspace: &Path) -> Result<()> {
     Ok(())
 }
 
+fn verify_pause(session: &mut Session) -> Result<()> {
+    session.pause()?;
+    ensure!(!session.running()?, "Paused VM still reports running");
+    let frozen = session.progress()?;
+    thread::sleep(Duration::from_millis(750));
+    let later = session.progress()?;
+    for field in ["virtual_ns", "observations", "pc"] {
+        ensure!(!frozen[field].is_null() && frozen[field] == later[field], "{field} changed while paused");
+    }
+    session.resume()?;
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while session.progress()?["virtual_ns"].as_u64() <= frozen["virtual_ns"].as_u64() {
+        ensure!(Instant::now() < deadline, "Guest clock did not advance after resume");
+        thread::sleep(Duration::from_millis(20));
+    }
+    ensure!(session.running()?, "VM did not return to running after resume");
+    println!("{}", serde_json::json!({"in_memory_pause_resume":"passed"}));
+    Ok(())
+}
+
 fn memory_generation(workspace: &Path) -> Result<[u8; 24]> {
     let mut header = [0; 24];
     fs::File::open(workspace.join("phone-memory.k750mem"))?.read_exact(&mut header)?;
@@ -254,6 +274,7 @@ fn main() -> Result<()> {
             wait_for_serial(&mut session, &workspace, "initial-boot", 240)?;
             finish_first_setup(&mut session)?;
         }
+        if fresh.is_some() { verify_pause(&mut session)?; }
         directory = match internal_other(&mut session) {
             Ok(directory) => directory,
             Err(error) => {

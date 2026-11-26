@@ -181,6 +181,16 @@ fn pack_memory(output: &mut fs::File, generation: u128,
     header.write(output)
 }
 
+fn pack_flash_directory(directory: &Path, output: &mut fs::File, generation: u128) -> Result<()> {
+    pack_memory(output, generation, |output, name, _, size| {
+        let mut input = fs::File::open(directory.join(name))?;
+        ensure!(input.metadata()?.len() == size, "Invalid flash image size for {name}");
+        let hash = copy_image(&mut input, output, size)?;
+        verify_end(input)?;
+        Ok(hash)
+    })
+}
+
 pub(crate) struct PendingMemory { path: PathBuf, generation: u128 }
 impl PendingMemory {
     fn create(workspace: &Path) -> Result<(Self, fs::File)> {
@@ -192,13 +202,7 @@ impl PendingMemory {
 
     pub(crate) fn pack(workspace: &Path, directory: &Path) -> Result<Self> {
         let (pending, mut output) = Self::create(workspace)?;
-        pack_memory(&mut output, pending.generation, |output, name, _, size| {
-            let mut input = fs::File::open(directory.join(name))?;
-            ensure!(input.metadata()?.len() == size, "Invalid flash image size for {name}");
-            let hash = copy_image(&mut input, output, size)?;
-            verify_end(input)?;
-            Ok(hash)
-        })?;
+        pack_flash_directory(directory, &mut output, pending.generation)?;
         output.sync_all()?;
         Ok(pending)
     }
@@ -253,7 +257,7 @@ impl FlashImages {
         ensure!(self.format_version == 1 && generation_name(&self.directory), "Invalid internal storage metadata");
         let directory = workspace.join(&self.directory);
         ensure!(inventory(&directory)? == self.images, "Internal storage image checksum differs");
-        pack_memory(&directory, &mut fs::File::create(destination)?, nonce()?)
+        pack_flash_directory(&directory, &mut fs::File::create(destination)?, nonce()?)
     }
 }
 

@@ -61,6 +61,8 @@ class EmulatorActivity : AppCompatActivity() {
     private val heldTouch = mutableSetOf<Int>()
     private val heldPhysical = mutableSetOf<Int>()
     private var sentMask = 0
+    private var foreground = false
+    private var sessionStarting = false
     private var fullscreen = false
     private var bindings = emptyList<Binding>()
     private var developerPanel: DeveloperPanel? = null
@@ -228,16 +230,38 @@ class EmulatorActivity : AppCompatActivity() {
         if (selection.isBlank()) finish()
     }
 
-    override fun onStart() {
-        super.onStart()
+    override fun onResume() {
+        super.onResume()
+        foreground = true
         root.keepScreenOn = preferences.keepAwake
-        if (selection.isNotBlank()) startSession()
+        if (selection.isBlank()) return
+        if (sessionStarting || sessionHandle.get() != 0L) {
+            setSessionPaused(false)
+            startAudio(generation.get())
+            lcd.setRunning(lcd.onPresentationFrame != null)
+        } else {
+            startSession()
+        }
     }
 
-    override fun onStop() {
+    override fun onPause() {
+        releaseKeys()
+        foreground = false
         root.keepScreenOn = false
-        stopSession()
-        super.onStop()
+        lcd.setRunning(false)
+        audioPlayer?.close()
+        audioPlayer = null
+        if (sessionStarting || sessionHandle.get() != 0L) setSessionPaused(true)
+        super.onPause()
+    }
+
+    private fun setSessionPaused(paused: Boolean) {
+        val token = generation.get()
+        // Resolve the handle on the executor, including when starting is still in flight.
+        nativeExecutor.execute {
+            val handle = sessionHandle.get()
+            if (generation.get() == token && handle != 0L) NativeBridge.nativeSetPaused(handle, paused)
+        }
     }
 
     override fun onDestroy() {
@@ -284,21 +308,25 @@ class EmulatorActivity : AppCompatActivity() {
         ViewCompat.requestApplyInsets(root)
     }
 
-    private fun startSession() {
-        val token = generation.incrementAndGet()
-        audioPlayer?.close()
+    private fun startAudio(token: Long) {
+        if (audioPlayer != null || !preferences.sound) return
         audioProblem = null
-        val player = if (preferences.sound) AudioPlayer { error ->
+        audioPlayer = AudioPlayer { error ->
             if (generation.get() == token) {
                 audioProblem = error
                 val active = sessionHandle.get()
-                if (active != 0L) nativeExecutor.execute {
+                if (active != 0L) runCatching { nativeExecutor.execute {
                     if (generation.get() == token && sessionHandle.get() == active)
                         NativeBridge.nativeLog(active, "error", "android-audio", error)
-                }
+                } }
             }
-        } else null
-        audioPlayer = player
+        }
+    }
+
+    private fun startSession() {
+        val token = generation.incrementAndGet()
+        sessionStarting = true
+        startAudio(token)
         status.setText(R.string.emulator_starting)
         waiting.visibility = View.VISIBLE
         nativeExecutor.execute {
@@ -311,9 +339,10 @@ class EmulatorActivity : AppCompatActivity() {
                     check(it != 0L) { "Could not start the phone." }
                 }
             } catch (error: Throwable) {
-                player?.close()
                 runOnUiThread {
                     if (generation.get() == token) {
+                        sessionStarting = false
+                        audioPlayer?.close()
                         audioPlayer = null
                         waiting.visibility = View.GONE
                         status.text = error.message ?: "Could not start the phone."
@@ -321,16 +350,20 @@ class EmulatorActivity : AppCompatActivity() {
                 }
                 return@execute
             }
-            if (generation.get() != token) { player?.close(); stopAndDestroy(handle); return@execute }
             sessionHandle.set(handle)
+            if (generation.get() != token) {
+                if (sessionHandle.compareAndSet(handle, 0)) stopAndDestroy(handle)
+                return@execute
+            }
             diagnosticsDueNs = 0L
             audioProblem?.let { NativeBridge.nativeLog(handle, "error", "android-audio", it) }
             runOnUiThread {
                 if (generation.get() == token && sessionHandle.get() == handle) {
+                    sessionStarting = false
                     recordedPresentations = lcd.presentationCount
                     latestFiles = JSONObject()
                     lcd.onPresentationFrame = { pollNative(token, handle) }
-                    lcd.setRunning(true)
+                    lcd.setRunning(foreground)
                 }
             }
         }
@@ -388,6 +421,7 @@ class EmulatorActivity : AppCompatActivity() {
     private fun stopSession() {
         releaseKeys()
         generation.incrementAndGet()
+        sessionStarting = false
         lcd.setRunning(false)
         lcd.onPresentationFrame = null
         val handle = sessionHandle.getAndSet(0)
@@ -456,7 +490,8 @@ class EmulatorActivity : AppCompatActivity() {
     }
 
     private fun drainFiles() {
-        if (activeFile != null || pendingFiles.isEmpty() || !latestFiles.optBoolean("attached") || latestFiles.optBoolean("busy")) return
+        if (!foreground || activeFile != null || pendingFiles.isEmpty() ||
+            !latestFiles.optBoolean("attached") || latestFiles.optBoolean("busy")) return
         val handle = sessionHandle.get(); val token = generation.get()
         if (handle == 0L) return
         val action = pendingFiles.removeFirst()
@@ -791,7 +826,7 @@ class EmulatorActivity : AppCompatActivity() {
 
     private fun releaseKeys() { heldTouch.clear(); heldPhysical.clear(); sendKeys() }
     private fun sendKeys() {
-        val mask = (heldTouch + heldPhysical).fold(0) { a, b -> a or b }
+        val mask = if (foreground) (heldTouch + heldPhysical).fold(0) { a, b -> a or b } else 0
         if (mask == sentMask) return
         sentMask = mask
         val token = generation.get(); val handle = sessionHandle.get()
@@ -818,7 +853,7 @@ class EmulatorActivity : AppCompatActivity() {
             else -> null
         }
         val binding = bindings.firstOrNull { it.label == label || (label?.length == 1 && it.label.startsWith("$label ")) }
-        if (binding == null || sessionHandle.get() == 0L) return super.dispatchKeyEvent(event)
+        if (binding == null || !foreground || sessionHandle.get() == 0L) return super.dispatchKeyEvent(event)
         if (event.action == KeyEvent.ACTION_DOWN) heldPhysical.add(binding.mask)
         else if (event.action == KeyEvent.ACTION_UP) heldPhysical.remove(binding.mask)
         sendKeys()

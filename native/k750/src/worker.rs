@@ -90,8 +90,10 @@ fn input_history_suffix(history: &VecDeque<String>) -> String {
     }
 }
 
+enum WorkerCommand { Keys(u32), SetPaused(bool), Stop }
+
 pub struct Worker {
-    input: mpsc::Sender<u32>,
+    input: mpsc::Sender<WorkerCommand>,
     last_input: AtomicU32,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
@@ -147,7 +149,43 @@ impl Worker {
                     let mut status_due = due;
                     let mut input_due = due;
                     let mut pending_input = None;
+                    let mut pause_requested = false;
+                    let mut paused = false;
                     while !worker_stop.load(Ordering::Relaxed) {
+                        match pending_input.take().or_else(|| worker_input.try_recv().ok()) {
+                            Some(WorkerCommand::SetPaused(next)) => {
+                                pause_requested = next;
+                                if paused && !next {
+                                    session.resume()?;
+                                    paused = false;
+                                    due = Instant::now();
+                                    status_due = due;
+                                    input_due = due;
+                                }
+                            }
+                            Some(WorkerCommand::Keys(keys)) if !paused => {
+                                if Instant::now() >= input_due {
+                                    session.contacts(&crate::keys::qmp_contacts(keys))?;
+                                    input_due = Instant::now() + PRESENTATION_INTERVAL;
+                                } else {
+                                    pending_input = Some(WorkerCommand::Keys(keys));
+                                }
+                            }
+                            Some(WorkerCommand::Stop) => break,
+                            _ => {}
+                        }
+                        // Let an accepted file transfer finish; suspending the guest
+                        // midstream would time out the phone's live OBEX connection.
+                        if pause_requested && !paused && !worker_files.snapshot().busy {
+                            session.pause()?;
+                            paused = true;
+                        }
+                        if paused {
+                            // Wait for a command without polling the frozen guest.
+                            pending_input = worker_input.recv().ok();
+                            if pending_input.is_none() { break; }
+                            continue;
+                        }
                         if worker_files.pending_commit() {
                             worker_diagnostics.log("info", "checkpoint", "Saving imported file before completing its move.");
                             if let Err(error) = session.save_with_resume(options.resume) {
@@ -158,14 +196,6 @@ impl Worker {
                             // rendering deadline miss or a backlog of polls.
                             due = Instant::now();
                             status_due = due;
-                        }
-                        // Contact edges wake the worker immediately, while
-                        // press/release pairs retain the firmware scan interval.
-                        if Instant::now() >= input_due {
-                            if let Some(keys) = pending_input.take().or_else(|| worker_input.try_recv().ok()) {
-                                session.contacts(&crate::keys::qmp_contacts(keys))?;
-                                input_due = Instant::now() + PRESENTATION_INTERVAL;
-                            }
                         }
                         if Instant::now() >= due {
                             if let Some(frame) = session.frame()? {
@@ -195,12 +225,14 @@ impl Worker {
                             std::thread::sleep(delay);
                         } else {
                             match worker_input.recv_timeout(delay) {
-                                Ok(keys) => pending_input = Some(keys),
+                                Ok(command) => pending_input = Some(command),
                                 Err(mpsc::RecvTimeoutError::Timeout) => {},
                                 Err(mpsc::RecvTimeoutError::Disconnected) => break,
                             }
                         }
                     }
+                    // A final save may need the running guest to disconnect its file service.
+                    if paused { session.resume()?; }
                     session.save_with_resume(options.resume)?;
                     return Ok(if options.resume { "Stopped. Phone session and internal storage saved." }
                         else { "Stopped. Internal storage saved." }.into());
@@ -213,12 +245,28 @@ impl Worker {
                 let mut last_report: Option<RunReport> = None;
                 let mut last_keys = 0;
                 let mut input_history = VecDeque::with_capacity(8);
+                let mut paused = false;
                 while !worker_stop.load(Ordering::Relaxed) {
+                    let command = if paused { worker_input.recv().ok() } else { worker_input.try_recv().ok() };
+                    match command {
+                        Some(WorkerCommand::SetPaused(next)) => {
+                            if next && !paused {
+                                machine.set_phone_keys(0)?;
+                                last_keys = 0;
+                            }
+                            paused = next;
+                            worker_diagnostics.set_running(!paused);
+                            continue;
+                        }
+                        Some(WorkerCommand::Stop) => break,
+                        _ if paused => continue,
+                        _ => {}
+                    }
                     // Apply at most one contact transition per guest quantum.
                     // This preserves ordering while ensuring a queued release
                     // cannot overtake the firmware's opportunity to service
                     // the preceding press interrupt.
-                    let input_applied = if let Ok(keys) = worker_input.try_recv() {
+                    let input_applied = if let Some(WorkerCommand::Keys(keys)) = command {
                         let instructions = last_report.as_ref().map_or(0, |report| report.execution.instructions);
                         let pc = last_report.as_ref().map_or(0, |report| report.execution.pc);
                         let entry = format!(
@@ -294,12 +342,17 @@ impl Worker {
 
     pub fn set_phone_keys(&self, keys: u32) {
         if self.last_input.swap(keys, Ordering::Relaxed) == keys { return; }
-        let _ = self.input.send(keys);
+        let _ = self.input.send(WorkerCommand::Keys(keys));
+    }
+
+    pub fn set_paused(&self, paused: bool) {
+        if paused { self.last_input.store(0, Ordering::Relaxed); }
+        let _ = self.input.send(WorkerCommand::SetPaused(paused));
     }
 
     pub fn stop(&mut self) {
-        self.set_phone_keys(0);
         self.stop.store(true, Ordering::Relaxed);
+        let _ = self.input.send(WorkerCommand::Stop);
         if let Some(handle) = self.handle.take() { let _ = handle.join(); }
     }
 }
