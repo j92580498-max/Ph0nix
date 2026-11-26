@@ -112,7 +112,8 @@ def test_pmic_fault_preserves_committed_internal_storage(tmp_path, monkeypatch):
     region['seeds'][0]['data'] = code + region['seeds'][0]['data']
     region['size'] = (len(region['seeds'][0]['data']) + 4095) & ~4095
     spec['executable_ranges'][0]['end'] += len(code)
-    spec['instruction_limit'] += 8
+    # The native host runs without research guards or an instruction cap.
+    spec.pop('instruction_limit')
     storage = storage_state(tmp_path)
     spec['regions'] += storage['regions'][1:]
     spec.update(nor_model=storage['nor_model'], nand=storage['nand'])
