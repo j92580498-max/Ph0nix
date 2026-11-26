@@ -8,7 +8,7 @@ use crate::{flash::{self, FlashExport, PendingMemory, MEMORY_FILE}, HostOptions,
 use crate::audio::{AudioBuffer, AudioTransport};
 use crate::diagnostics::DiagnosticsHandle;
 use crate::display::DisplayTransport;
-use crate::storage::{PhoneFiles,SerialTransport};
+use crate::storage::{CardImage,PhoneFiles,SerialTransport};
 use serde::{Deserialize,Serialize};
 
 pub const PRESENTATION_INTERVAL:Duration=Duration::from_nanos(16_666_667);
@@ -127,6 +127,7 @@ pub struct Session {
     last_panel:Option<Value>,
     log_offset:u64,
     _boot_flash:Option<FlashExport>,
+    card_inserted:bool,
     _lease:fs::File,
 }
 
@@ -335,7 +336,7 @@ impl Session {
         };
         let mut session=Self {qmp,audio,diagnostics,files,_audio_transport:audio_transport,_serial_transport:serial_transport,
             display_transport,display_stream:false,last_stream_revision:None,
-            process,workspace,prepared:prepared.to_owned(),last_panel:None,log_offset:0,_boot_flash:boot_flash,_lease:lease};
+            process,workspace,prepared:prepared.to_owned(),last_panel:None,log_offset:0,_boot_flash:boot_flash,card_inserted:false,_lease:lease};
         // Engines without binary transport retain the cached QMP path. Negotiate once;
         // current engines send complete binary panels without per-frame RPCs.
         let properties=session.qmp.execute("qom-list",json!({"path":"/machine"}))?;
@@ -374,6 +375,20 @@ impl Session {
             revision:panel["frames"].as_u64().context("LCD revision")?};
         self.diagnostics.record_frame_decode(decode_start.elapsed());
         Ok(Some(frame))
+    }
+    pub fn insert_memory_stick(&mut self,path:&Path) -> Result<()> {
+        ensure!(!self.card_inserted,"Stop the phone before changing its Memory Stick");
+        ensure!(self.running()?,"Start or resume the phone before inserting its Memory Stick");
+        let card=CardImage::open(path)?;
+        let absolute=card.path().canonicalize()?;
+        let name=absolute.to_str().context("Memory Stick image path is not UTF-8")?;
+        self.qmp.execute("qom-set",json!({"path":"/machine","property":"memorystick-image","value":name}))?;
+        self.card_inserted=true;
+        self.diagnostics.log("info","storage",format!("Inserted Memory Stick: {}",absolute.display()));
+        Ok(())
+    }
+    pub fn will_save_checkpoint(&self,resume:bool) -> bool {
+        resume && !self.card_inserted
     }
     pub fn contacts(&mut self,keys:&[&str]) -> Result<()> {
         self.qmp.execute("qom-set",json!({"path":"/machine/keypad","property":"pressed",
@@ -519,7 +534,7 @@ impl Session {
         ensure!(self.summary()?["stop"].is_null(),
             "Firmware stopped with an error; the previous saved phone state was kept");
         let memory=self.pack_internal_memory()?;
-        if !resume {
+        if !self.will_save_checkpoint(resume) {
             memory.publish(&self.workspace)?;
             remove_old_checkpoint(&self.workspace);
             return Ok(());

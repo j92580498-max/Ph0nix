@@ -1,5 +1,6 @@
 // Derived from tayga16/SamsungE380-Emu; original Apache-2.0/MIT terms retained.
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::{atomic::{AtomicBool, AtomicU32, Ordering}, mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -90,7 +91,10 @@ fn input_history_suffix(history: &VecDeque<String>) -> String {
     }
 }
 
-enum WorkerCommand { Keys(u32), SetPaused(bool), Stop }
+enum WorkerCommand {
+    Keys(u32), SetPaused(bool), Stop,
+    InsertMemoryStick(PathBuf, mpsc::Sender<Result<(), String>>),
+}
 
 pub struct Worker {
     input: mpsc::Sender<WorkerCommand>,
@@ -101,6 +105,7 @@ pub struct Worker {
     pub audio: AudioBuffer,
     pub diagnostics: DiagnosticsHandle,
     pub files: PhoneFiles,
+    card: Option<Arc<Mutex<Option<PathBuf>>>>,
 }
 
 impl Worker {
@@ -127,6 +132,8 @@ impl Worker {
         let worker_diagnostics = diagnostics.clone();
         let files = PhoneFiles::default();
         let worker_files = files.clone();
+        let card = (paths.device == "k750i").then(|| Arc::new(Mutex::new(None)));
+        let worker_card = card.clone();
         let handle = std::thread::Builder::new().name("phone-firmware".into()).spawn(move || {
             // Unicorn owns Rc state and must be constructed inside this thread.
             let result = (|| -> anyhow::Result<String> {
@@ -171,6 +178,15 @@ impl Worker {
                                     } else {
                                         pending_input = Some(WorkerCommand::Keys(keys));
                                     }
+                                }
+                                Some(WorkerCommand::InsertMemoryStick(path, reply)) => {
+                                    let result = session.insert_memory_stick(&path).map_err(|error| format!("{error:#}"));
+                                    if result.is_ok() {
+                                        if let Some(card) = &worker_card {
+                                            *card.lock().unwrap_or_else(|error| error.into_inner()) = Some(path);
+                                        }
+                                    }
+                                    let _ = reply.send(result);
                                 }
                                 Some(WorkerCommand::Stop) => break,
                                 _ => {}
@@ -243,7 +259,7 @@ impl Worker {
                             Err(recovery) => anyhow::bail!("{error:#}. Could not recover internal memory: {recovery:#}"),
                         }
                     }
-                    return Ok(if options.resume { "Stopped. Phone session and internal storage saved." }
+                    return Ok(if session.will_save_checkpoint(options.resume) { "Stopped. Phone session and internal storage saved." }
                         else { "Stopped. Internal storage saved." }.into());
                 }
                 let registry = crate::registry();
@@ -346,12 +362,25 @@ impl Worker {
             worker_diagnostics.set_running(false);
             let _ = sender.send(WorkerEvent::Finished(summary));
         })?;
-        Ok(Self { input, last_input: AtomicU32::new(u32::MAX), stop, handle: Some(handle), events, audio, diagnostics, files })
+        Ok(Self { input, last_input: AtomicU32::new(u32::MAX), stop, handle: Some(handle), events, audio, diagnostics, files, card })
     }
 
     pub fn set_phone_keys(&self, keys: u32) {
         if self.last_input.swap(keys, Ordering::Relaxed) == keys { return; }
         let _ = self.input.send(WorkerCommand::Keys(keys));
+    }
+
+    pub fn supports_memory_stick(&self) -> bool { self.card.is_some() }
+
+    pub fn inserted_memory_stick(&self) -> Option<PathBuf> {
+        self.card.as_ref().and_then(|card| card.lock().unwrap_or_else(|error| error.into_inner()).clone())
+    }
+
+    pub fn insert_memory_stick(&self, path: PathBuf) -> Result<mpsc::Receiver<Result<(), String>>, String> {
+        if !self.supports_memory_stick() { return Err("Select the K750i to use a Memory Stick".into()); }
+        let (tx, rx) = mpsc::channel();
+        self.input.send(WorkerCommand::InsertMemoryStick(path, tx)).map_err(|_| "The phone has stopped".to_owned())?;
+        Ok(rx)
     }
 
     pub fn set_paused(&self, paused: bool) {

@@ -46,7 +46,11 @@ It writes `ph0nix-transfer-test.txt`, exports it into the prepared-state directo
 
 `CardImage` creates raw FAT16 volume images from 16 to 1024 MiB. Image creation is sparse where the host filesystem supports it; operations stream file contents instead of loading the whole image into memory. The app can browse the image, create folders and import, export, copy, move or delete files. Image operations hold an exclusive file lock. Replacement uses a temporary directory entry and a backup entry so an incomplete write preserves the old destination. Portable FAT images have a 512-byte boot sector and contain a volume directly; partitioned disks and VHD container headers are not accepted.
 
-**The K750's Memory Stick Duo controller is not implemented.** Managing a card image in the app does not mount it in the phone. `CardInfo.guest_mount_supported` and `guest_mounted` therefore remain false. Native phone file transfers work independently of the removable-card controller.
+### Experimental K750i Memory Stick PRO Duo
+
+Start K750i and wait for it to finish booting. Open **Card images**, create or open a FAT16 `.img`, and choose **Insert into K750i**. The engine raises the card insertion interrupt and serves sector reads and writes to the phone from this separate file. Once the firmware recognizes the card, use **Phone files** to access it. The engine holds an exclusive lock, so stop the phone before editing, replacing, or reinserting the image. Use the same `.img` to reuse the card after a cold boot. A normal stop with a card inserted saves internal storage without a VM checkpoint.
+
+Firmware compatibility is checked by the `K750i Memory Stick storage` workflow on CT100. It exercises the stock R1DB001 firmware, including file listing, writeback to the raw image, and reopening the file after a cold boot.
 
 ## Controller evidence for further implementation
 
@@ -63,7 +67,7 @@ The supplied K750 MAIN has its low-level controller driver at `0x4489420C` throu
 | `0xFC010024` | Word writes to the transmit FIFO; width follows bits `4..5` of the FIFO mode. |
 | `0xFC01002C` | Halfword FIFO counts: low byte receive count; high byte transmit count, with a 16-byte transmit capacity assumed by the driver. |
 
-The driver emits TPC `2` (read long data), `3` (read short data), `4` (read registers), `7` (get interrupt), `8` (set register windows), `9` (extended command), `B` (write registers), `D` (write long data) and `E` (set command). Register-window setup and card identification, MSPro attribute data and block commands are still needed. The controller callback begins at `0x44894BAD`. An initialization argument of `0x0D` goes through clock/power helpers at `0x44A5CA08` and `0x44A5C5D8`; it is not evidence for IRQ13.
+The driver emits TPC `2` (read long data), `3` (read short data), `4` (read registers), `7` (get interrupt), `8` (set register windows), `9` (extended command), `B` (write registers), `D` (write long data) and `E` (set command). The experimental model implements the register windows, MS PRO identification, attribute reads and the sector read/write protocol. The controller callback begins at `0x44894BAD`. An initialization argument of `0x0D` goes through clock/power helpers at `0x44A5CA08` and `0x44A5C5D8`; it is not evidence for IRQ13.
 
 The K750 MAIN device-configuration string at `0x44433E82` contains:
 
@@ -75,7 +79,7 @@ The configuration callback at `0x44894C50` parses `intline` and binds it through
 
 Insertion uses a second interrupt. `dda/GPIO4` has compact line 69, tertiary bit 9 and cascade 30. The detect task at `0x448924B4` subscribes through `0x44AE2F94` with port 4, pin mask `0x04`, mode 2 and option 0. The supplied code clears the pin's direction bit at `0xF900002A`, sets polarity at `0xF900002E` according to its current level, and enables it at `0xF900002C`. The GPIO4 handler at `0x44AE240C` reads pending bits at `0xF9000030`, disables the selected pin, emits event `0x618D` and changes polarity before re-enabling it. `0x44892834` interprets GPIO42 low as inserted. The detect task consumes that event, schedules a debounce value of 20, rechecks the input, then calls `0x448926D8` to start the Memory Stick task.
 
-`build/ph0nix-memorystick-routing.txt` records the configuration bytes and supplied K750 disassembly for these findings. Removing the empty-slot profile from a copied running checkpoint and running for five host seconds (4.29 guest seconds) produced no new controller accesses (`build/ph0nix-card-probe/probe.log`); a GPIO value change without the insertion interrupt is insufficient. The current empty-slot GPIO42 model must remain active until GPIO insertion events and the complete controller/card protocol are implemented and tested.
+`build/ph0nix-memorystick-routing.txt` records the configuration bytes and supplied K750 disassembly for these findings. Removing the empty-slot profile from a copied running checkpoint and running for five host seconds (4.29 guest seconds) produced no new controller accesses (`build/ph0nix-card-probe/probe.log`); a GPIO value change without the insertion interrupt is insufficient. The image-backed controller uses the GPIO insertion interrupt; the regular empty-slot GPIO42 model still applies when no card is attached.
 
 GitHub code searches for `MSPRO_CMD_READ_ATRB` and `MS_TPC_READ_REG` in `torvalds/linux` found useful protocol references at commit `aacb7797504183a90d66b19b1efb555cfe9b3eec`:
 

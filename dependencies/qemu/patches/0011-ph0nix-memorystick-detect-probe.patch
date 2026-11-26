@@ -60,10 +60,10 @@ index 41a0a77d248241c1568d555153976d24ec3f2806..1a9e6284ed3bc63ce7a70b873e1b0f03
                  DB2010Register *r = g_ptr_array_index(s->registers, i);
 diff --git a/hw/arm/db2010-memorystick.c b/hw/arm/db2010-memorystick.c
 new file mode 100644
-index 0000000000000000000000000000000000000000..31183b86baf5b28c016e34d4ccc166f6f773eb5b
+index 0000000000000000000000000000000000000000..c4390d31a6158281a01ee2805e99c4e3e7890166
 --- /dev/null
 +++ b/hw/arm/db2010-memorystick.c
-@@ -0,0 +1,387 @@
+@@ -0,0 +1,399 @@
 +/* Memory Stick PRO card and DB2010 programmed I/O controller.
 + * SPDX-License-Identifier: GPL-2.0-or-later */
 +#include "qemu/osdep.h"
@@ -222,6 +222,18 @@ index 0000000000000000000000000000000000000000..31183b86baf5b28c016e34d4ccc166f6
 +    }
 +}
 +
++static bool sync_image(FILE *image)
++{
++    if (fflush(image)) {
++        return false;
++    }
++#ifdef _WIN32
++    return _commit(fileno(image)) == 0;
++#else
++    return fsync(fileno(image)) == 0;
++#endif
++}
++
 +static bool data_sector(DB2010MemoryStick *ms, bool write)
 +{
 +    clearerr(ms->image);
@@ -232,7 +244,7 @@ index 0000000000000000000000000000000000000000..31183b86baf5b28c016e34d4ccc166f6
 +        return fread(ms->rx, 1, DBMS_SECTOR, ms->image) == DBMS_SECTOR;
 +    }
 +    return fwrite(ms->tx, 1, DBMS_SECTOR, ms->image) == DBMS_SECTOR &&
-+           fflush(ms->image) == 0 && qemu_fdatasync(fileno(ms->image)) == 0;
++           sync_image(ms->image);
 +}
 +
 +static void sector_done(DB2010MemoryStick *ms, bool ok)

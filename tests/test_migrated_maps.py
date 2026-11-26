@@ -46,6 +46,5 @@ def test_configured_register_views(tmp_path):
         '-I' + str(ROOT / 'qemu/hw/arm'),
         str(RESOURCES/'checks/map_bank.c'), '-o', str(exe),
         *component_inputs('register-bank', 'timer', 'memorystick'),
-        str(ROOT / 'qemu/build/libqemuutil.a'),
     ], check=True)
     subprocess.run([str(exe)], check=True)

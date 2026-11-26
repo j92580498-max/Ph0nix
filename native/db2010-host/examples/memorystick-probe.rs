@@ -29,6 +29,7 @@ fn require_running(session: &mut Session) -> Result<()> {
 }
 
 fn boot(engine: &Path, state: &Path, first: bool) -> Result<Session> {
+    println!("Starting {} K750i boot", if first { "first" } else { "cold" });
     let mut session = Session::open(engine, state, None)?;
     let seconds = if first { 240 } else { 150 };
     let deadline = Instant::now() + Duration::from_secs(seconds * 3 + 30);
@@ -58,13 +59,25 @@ fn boot(engine: &Path, state: &Path, first: bool) -> Result<Session> {
     Ok(session)
 }
 
+// These addresses belong to the stock R1DB001 MAIN used by this probe.
+fn log_detect_state(session: &mut Session, phase: &str) {
+    for (field, address, count) in [("detect task", 0x4c07add8, 12), ("GPIO42 subscription", 0x4c09937c, 32)] {
+        let report = session.qmp.execute("human-monitor-command", json!({
+            "command-line": format!("xp /{count}bx {address:#x}")
+        }));
+        match report {
+            Ok(value) => println!("{phase} {field}: {}", value.as_str().unwrap_or_default().trim()),
+            Err(error) => println!("{phase} {field}: {error:#}"),
+        }
+    }
+}
+
 fn insert(session: &mut Session, card: &CardImage) -> Result<()> {
     let before = probe(session)?;
     ensure!(before["card_present"] == false && before["detect_irqs"] == 0, "Slot not empty: {before}");
     println!("Empty slot: {before}");
-    session.qmp.execute("qom-set", json!({
-        "path":"/machine", "property":"memorystick-image", "value":card.path()
-    }))?;
+    log_detect_state(session, "Before insertion");
+    session.insert_memory_stick(card.path())?;
     let lock_error = card.info().expect_err("Host opened the image while the engine held it");
     ensure!(lock_error.to_string().contains("in use"), "Unexpected image error: {lock_error:#}");
     let deadline = Instant::now() + Duration::from_secs(40);
@@ -86,7 +99,10 @@ fn insert(session: &mut Session, card: &CardImage) -> Result<()> {
             println!("K750i read sectors from the inserted card: {status}");
             return Ok(());
         }
-        ensure!(Instant::now() < deadline, "K750i failed to read the card: {status}");
+        if Instant::now() >= deadline {
+            log_detect_state(session, "After insertion");
+            bail!("K750i failed to read the card: {status}");
+        }
         thread::sleep(Duration::from_millis(50));
     }
 }
@@ -126,7 +142,7 @@ fn find_card_folder(session: &mut Session) -> Result<Vec<String>> {
     for entry in root.iter().filter(|entry| entry.directory) {
         let top = vec![entry.name.clone()];
         let folders = list(session, &top)?;
-        for folder in folders.iter().filter(|e| e.directory && e.name.eq_ignore_ascii_case("Other")) {
+        for folder in folders.iter().filter(|e| e.directory && ["Other", "Прочее", "Другое"].iter().any(|name| e.name.to_lowercase() == name.to_lowercase())) {
             let path = vec![entry.name.clone(), folder.name.clone()];
             if list(session, &path)?.iter().any(|e| !e.directory && e.name.eq_ignore_ascii_case(SEED)) {
                 return Ok(path);
@@ -153,8 +169,10 @@ fn main() -> Result<()> {
     let state = prepare::prepare_locked_at(&main, &fs_image, &workspace)?.state;
     let workspace = workspace.canonicalize()?;
     let card = CardImage::create(&workspace.join("card.img"), 32)?;
-    let other = vec!["Other".into()];
-    card.make_directory(&other)?;
+    let other = vec!["MSSEMC".into(), "Media files".into(), "other".into()];
+    for depth in 1..=other.len() {
+        card.make_directory(&other[..depth])?;
+    }
     let seed = b"This file was placed on the card before boot.\r\n".repeat(140);
     let written = b"This file was written by the K750i firmware.\r\n".repeat(240);
     let seed_host = workspace.join("seed-input.txt");
@@ -172,7 +190,9 @@ fn main() -> Result<()> {
     let status = probe(&mut session)?;
     ensure!(status["sectors_written"].as_u64().unwrap_or(0) > 0, "No sector writes through the card controller: {status}");
     println!("After firmware write: {status}");
-    session.save_with_resume(false)?;
+    // A connected card has its own state and must survive a normal stop
+    // even when the launcher is configured to resume the phone session.
+    session.save_with_resume(true)?;
     drop(session);
 
     let raw_readback = workspace.join("image-readback.txt");

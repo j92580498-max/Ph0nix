@@ -585,12 +585,12 @@
     },
     {
       "path": "patches/0011-ph0nix-memorystick-detect-probe.patch",
-      "sha256": "02151e571e4b3e4e2d03e07f6651eb9b4ff027ad906cf4a3f810176de2ec9f0e",
+      "sha256": "ae7cf15046cbb82affa53196b65189fce900231caf85bcba8f3fc3e6ac926b34",
       "files": {
         "hw/arm/db2010-checkpoint.c": "de0e2508ed954a5c4875ba54b66ca790ea10e09f604fba3b9056d739e5fdac0d",
         "hw/arm/db2010-components.h": "fa6a7234d9711f8251ef9c57e574be8fd29b6aceccba472b242f50f4a2dbc283",
         "hw/arm/db2010-device.c": "c10e6a57a67ab1cd1362524fc26db1df7f9862fa362845980eaf212bf36d68df",
-        "hw/arm/db2010-memorystick.c": "bba25ab21499a5f729badc07a03fa1bd0a5912f257089d4ab15efecb5d3ce541",
+        "hw/arm/db2010-memorystick.c": "1d4a0e58f19aa128f245adfd8f8564343ff4223896dfd7490dca98a5b9374256",
         "hw/arm/db2010-memorystick.h": "8b88ab926e43c83aa34f4955e84f16702adaaefbf324477c76d65886ea5e897e",
         "hw/arm/db2010-observe.c": "63d8c32e60d0cab71815d8409f51033c55909cd0615f09406f5065065c4da0b5",
         "hw/arm/db2010-register-bank.c": "02eb37301dd45520875f938342aaaa21e556ce9f2de76ae5ff20a18832441b98",
