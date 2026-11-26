@@ -12,6 +12,8 @@ internal class FirmwareAdapter(
     private val onRun: (FirmwareEntry) -> Unit,
     private val onSelectOneNand: (FirmwareEntry) -> Unit,
     private val onUseErasedFlash: (FirmwareEntry) -> Unit,
+    private val onExportMemory: (FirmwareEntry) -> Unit,
+    private val onImportMemory: (FirmwareEntry) -> Unit,
     private val onRemove: (FirmwareEntry) -> Unit,
 ) : RecyclerView.Adapter<FirmwareAdapter.ViewHolder>() {
     private var items: List<FirmwareEntry> = emptyList()
@@ -54,12 +56,18 @@ internal class FirmwareAdapter(
             if (entry.onenand != null) {
                 popup.menu.add(0, ACTION_USE_ERASED, 1, R.string.nand_auto)
             }
-            popup.menu.add(0, ACTION_REMOVE, 2, R.string.remove_firmware)
+            if (entry.device == "k750i") {
+                popup.menu.add(0, ACTION_EXPORT_MEMORY, 2, R.string.k750_memory_export)
+                popup.menu.add(0, ACTION_IMPORT_MEMORY, 2, R.string.k750_memory_import)
+            }
+            popup.menu.add(0, ACTION_REMOVE, 3, R.string.remove_firmware)
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     ACTION_RUN -> onRun(entry)
                     ACTION_SELECT_NAND -> onSelectOneNand(entry)
                     ACTION_USE_ERASED -> onUseErasedFlash(entry)
+                    ACTION_EXPORT_MEMORY -> onExportMemory(entry)
+                    ACTION_IMPORT_MEMORY -> onImportMemory(entry)
                     ACTION_REMOVE -> onRemove(entry)
                 }
                 true
@@ -73,5 +81,7 @@ internal class FirmwareAdapter(
         const val ACTION_USE_ERASED = 2
         const val ACTION_REMOVE = 3
         const val ACTION_RUN = 4
+        const val ACTION_EXPORT_MEMORY = 5
+        const val ACTION_IMPORT_MEMORY = 6
     }
 }

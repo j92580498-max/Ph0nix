@@ -141,7 +141,7 @@ impl Worker {
                     while !worker_stop.load(Ordering::Relaxed) {
                         if worker_files.pending_commit() {
                             worker_diagnostics.log("info", "checkpoint", "Saving imported file before completing its move.");
-                            if let Err(error) = session.save() {
+                            if let Err(error) = session.save_with_resume(options.resume) {
                                 worker_diagnostics.log("error", "files", format!("File move could not finish: {error:#}"));
                             }
                             session.resume_after_save()?;
@@ -192,8 +192,9 @@ impl Worker {
                             }
                         }
                     }
-                    session.save()?;
-                    return Ok("Stopped. Phone state and internal storage saved.".into());
+                    session.save_with_resume(options.resume)?;
+                    return Ok(if options.resume { "Stopped. Phone session and internal storage saved." }
+                        else { "Stopped. Internal storage saved." }.into());
                 }
                 let registry = crate::registry();
                 let mut machine = registry.open(&paths.device, paths.loader.as_deref(), &paths.files, RuntimeOptions::default())?;

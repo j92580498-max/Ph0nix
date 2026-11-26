@@ -122,6 +122,35 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeValidateSelectio
 }
 
 #[no_mangle]
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeTransferInternalMemory<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+    json: JString<'local>,
+    data_directory: JString<'local>,
+    file: JString<'local>,
+    importing: jboolean,
+) -> jstring {
+    let result = (|| -> Result<(), String> {
+        let selection: FirmwareSelection = serde_json::from_str(&read_string(&mut env, &json)?)
+            .map_err(|error| error.to_string())?;
+        if selection.device != "k750i" {
+            return Err("This memory format is only supported for K750i.".into());
+        }
+        let fs = selection.files.companions.get("fs").ok_or("Select the matching K750i FS.")?;
+        let workspace = db2010_host::prepare::workspace(
+            &selection.files.image, fs, &path(read_string(&mut env, &data_directory)?),
+        ).map_err(|error| format!("{error:#}"))?;
+        let file = path(read_string(&mut env, &file)?);
+        if importing != 0 {
+            db2010_host::qmp::import_internal_memory(&workspace, &file)
+        } else {
+            db2010_host::qmp::export_internal_memory(&workspace, &file)
+        }.map_err(|error| format!("{error:#}"))
+    })();
+    new_string(&mut env, &result.err().unwrap_or_default())
+}
+
+#[no_mangle]
 pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStartSelection<'local>(
     mut env: JNIEnv<'local>,
     _this: JObject<'local>,

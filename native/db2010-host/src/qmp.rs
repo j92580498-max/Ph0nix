@@ -4,7 +4,7 @@ use anyhow::{bail, ensure, Context, Result};
 use serde_json::{json, Value};
 use std::{fs, io::{BufRead, BufReader, Read, Seek, SeekFrom, Write}, net::{TcpListener,TcpStream},
     path::{Path,PathBuf}, process::{Child,Command,Stdio}, thread, time::{Duration,Instant}};
-use crate::{HostOptions,LcdFrame};
+use crate::{flash::{self, FlashExport, PendingMemory, MEMORY_FILE}, HostOptions, LcdFrame};
 use crate::audio::{AudioBuffer, AudioTransport};
 use crate::diagnostics::DiagnosticsHandle;
 use crate::display::DisplayTransport;
@@ -126,6 +126,7 @@ pub struct Session {
     prepared:PathBuf,
     last_panel:Option<Value>,
     log_offset:u64,
+    _boot_flash:Option<FlashExport>,
     _lease:fs::File,
 }
 
@@ -133,10 +134,12 @@ pub struct Session {
 struct SavedCheckpoint {
     format_version:u32, file:String, checkpoint_tcm:Value,
     #[serde(default, skip_serializing_if="Option::is_none")]
-    flash:Option<crate::flash::FlashImages>,
+    flash:Option<flash::FlashImages>,
+    #[serde(default, skip_serializing_if="Option::is_none")]
+    memory_generation:Option<String>,
 }
 
-fn atomic_replace(from:&Path,to:&Path) -> std::io::Result<()> {
+pub(crate) fn atomic_replace(from:&Path,to:&Path) -> std::io::Result<()> {
     #[cfg(not(windows))] {fs::rename(from,to)}
     #[cfg(windows)] {
         use std::os::windows::ffi::OsStrExt;
@@ -225,14 +228,20 @@ impl Session {
         if options.resume {
             let metadata=workspace.join("phone.saved.json");
             if metadata.is_file() {
-                let saved:SavedCheckpoint=serde_json::from_slice(&fs::read(metadata)?)?;
-                ensure!(saved.format_version==1 && saved_name(&saved.file),"Invalid native saved state metadata");
-                checkpoint=Some(workspace.join(saved.file));
-                ensure!(checkpoint.as_ref().unwrap().is_file(),"Native saved state file is missing");
-                state["checkpoint_tcm"]=saved.checkpoint_tcm;
+                let saved=read_checkpoint(&metadata)?;
+                let memory=workspace.join(MEMORY_FILE);
+                let matches=if memory.exists() {
+                    let generation=flash::memory_generation(&memory)?.to_string();
+                    saved.memory_generation.as_deref()==Some(generation.as_str())
+                } else {saved.memory_generation.is_none()};
+                let file=workspace.join(&saved.file);
+                if matches && file.is_file() {
+                    checkpoint=Some(file);
+                    state["checkpoint_tcm"]=saved.checkpoint_tcm;
+                }
             } else {
                 let legacy=workspace.join("phone.vmstate");
-                checkpoint=legacy.is_file().then_some(legacy);
+                checkpoint=(!workspace.join(MEMORY_FILE).exists() && legacy.is_file()).then_some(legacy);
             }
         } else {state.as_object_mut().context("prepared state object")?.remove("checkpoint_tcm");}
         let temporary=workspace.join("state.json.pending");
@@ -260,12 +269,17 @@ impl Session {
         // Restore storage only for a cold boot. A VM checkpoint already owns
         // its NOR/NAND bytes, controller state and validity bookkeeping.
         let saved_metadata=workspace.join("phone.saved.json");
+        let mut boot_flash=None;
         if checkpoint.is_none() {
             live_state.as_object_mut().context("prepared state object")?.remove("checkpoint_tcm");
-            if saved_metadata.exists() {
-                let saved:SavedCheckpoint=serde_json::from_slice(&fs::read(saved_metadata)?)?;
-                ensure!(saved.format_version==1 && saved_name(&saved.file),"Invalid native saved state metadata");
-                if let Some(flash)=saved.flash {flash.apply(&workspace,&mut live_state)?;}
+            let memory=workspace.join(MEMORY_FILE);
+            if memory.exists() {
+                let flash=flash::unpack_memory(&workspace,&memory)?;
+                flash::apply_directory(flash.path(),&mut live_state)?;
+                diagnostics.log("info","storage","Cold boot with saved K750i internal memory.");
+                boot_flash=Some(flash);
+            } else if saved_metadata.exists() {
+                if let Some(flash)=read_checkpoint(&saved_metadata)?.flash {flash.apply(&workspace,&mut live_state)?;}
             }
         }
         live_state["timebase"]=json!({"profile":"qemu-realtime-v1"});
@@ -321,7 +335,7 @@ impl Session {
         };
         let mut session=Self {qmp,audio,diagnostics,files,_audio_transport:audio_transport,_serial_transport:serial_transport,
             display_transport,display_stream:false,last_stream_revision:None,
-            process,workspace,prepared:prepared.to_owned(),last_panel:None,log_offset:0,_lease:lease};
+            process,workspace,prepared:prepared.to_owned(),last_panel:None,log_offset:0,_boot_flash:boot_flash,_lease:lease};
         // Engines without binary transport retain the cached QMP path. Negotiate once;
         // current engines send complete binary panels without per-frame RPCs.
         let properties=session.qmp.execute("qom-list",json!({"path":"/machine"}))?;
@@ -442,11 +456,13 @@ impl Session {
             thread::sleep(Duration::from_millis(10));
         }
     }
-    pub fn save(&mut self) -> Result<()> {
-        let result=self.save_checkpoint().and_then(|()|self.files.commit_saved());
+    pub fn save(&mut self) -> Result<()> { self.save_with_resume(true) }
+
+    pub fn save_with_resume(&mut self, resume:bool) -> Result<()> {
+        let result=self.save_phone(resume).and_then(|()|self.files.commit_saved());
         if let Err(error)=&result {
             self.files.fail_pending_commit(&format!("{error:#}"));
-            self.diagnostics.log("error","checkpoint",format!("Phone save failed: {error:#}"));
+            self.diagnostics.log("error","storage",format!("Phone save failed: {error:#}"));
         }
         result
     }
@@ -459,7 +475,7 @@ impl Session {
         self.last_panel=None;
         Ok(())
     }
-    fn save_checkpoint(&mut self) -> Result<()> {
+    fn save_phone(&mut self, resume:bool) -> Result<()> {
         // An OBEX session is host state, not checkpoint state. Finish its
         // queued operation and return firmware to AT mode while the VM can
         // still acknowledge the disconnect; ambiguous streams cannot save.
@@ -469,12 +485,18 @@ impl Session {
         self.qmp.execute("stop",json!({}))?;
         ensure!(self.summary()?["stop"].is_null(),
             "Firmware stopped with an error; the previous saved phone state was kept");
-        let mut export=crate::flash::FlashExport::new(&self.workspace)?;
+        let export=crate::flash::FlashExport::new(&self.workspace)?;
         // Raw images total almost 64 MiB. Allow slower phone storage more
         // time than the normal five-second observation deadline.
         self.qmp.execute_with_timeout("qom-set",json!({"path":"/machine","property":"flash-byte-export",
             "value":export.path()}),Duration::from_secs(30)).context("Saving internal K750 storage")?;
-        let flash=export.seal()?;
+        let memory=PendingMemory::pack(&self.workspace,export.path())?;
+        drop(export);
+        if !resume {
+            memory.publish(&self.workspace)?;
+            remove_old_checkpoint(&self.workspace);
+            return Ok(());
+        }
         let layout=self.qmp.property("/machine","checkpoint-layout")?;
         let mut state:Value=serde_json::from_slice(&fs::read(&self.prepared)?)?;
         state["timebase"]=json!({"profile":"qemu-realtime-v1"});
@@ -482,36 +504,76 @@ impl Session {
         let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
         let name=format!("phone-{nonce}-{}.vmstate",std::process::id());
         let temporary=self.workspace.join(format!("{name}.pending"));
-        self.migrate("migrate",&temporary)?;
         let final_path=self.workspace.join(&name);
-        atomic_replace(&temporary,&final_path)?;
-        fs::OpenOptions::new().write(true).open(self.workspace.join(&name))?.sync_all()?;
         let metadata=self.workspace.join("phone.saved.json");
-        let previous=fs::read(&metadata).ok().and_then(|data|serde_json::from_slice::<SavedCheckpoint>(&data).ok());
-        // Publish the complete prepared state before the authoritative saved
-        // checkpoint metadata. A failed state write keeps the previous save.
-        let pending_state=self.workspace.join("state.json.pending");
-        fs::write(&pending_state,serde_json::to_vec_pretty(&state)?)?;
-        fs::OpenOptions::new().write(true).open(&pending_state)?.sync_all()?;
-        atomic_replace(&pending_state,&self.prepared)?;
+        let previous=read_checkpoint(&metadata).ok();
         let pending=self.workspace.join("phone.saved.json.pending");
-        fs::write(&pending,serde_json::to_vec(&SavedCheckpoint {
-            format_version:1,file:name.clone(),checkpoint_tcm:state["checkpoint_tcm"].clone(),flash:Some(flash)})?)?;
-        fs::OpenOptions::new().write(true).open(&pending)?.sync_all()?;
-        atomic_replace(&pending,&metadata)?;
-        // Metadata now refers to this generation, even if directory syncing
-        // subsequently fails. Never let the export guard remove its files.
-        export.publish();
-        // Source deletion for an imported move happens only after the new
-        // checkpoint, state and metadata have reached durable storage.
-        sync_directory(&self.workspace).context("Synchronizing phone checkpoint directory")?;
-        if let Some(previous)=previous {
-            if previous.file!=name && saved_name(&previous.file) {let _=fs::remove_file(self.workspace.join(previous.file));}
-            if let Some(flash)=previous.flash {flash.remove(&self.workspace);}
+        let result=(|| -> Result<()> {
+            self.migrate("migrate",&temporary)?;
+            atomic_replace(&temporary,&final_path)?;
+            fs::OpenOptions::new().write(true).open(&final_path)?.sync_all()?;
+            // A checkpoint is usable only with the matching published memory generation.
+            fs::write(&pending,serde_json::to_vec(&SavedCheckpoint {
+                format_version:1,file:name.clone(),checkpoint_tcm:state["checkpoint_tcm"].clone(),
+                flash:None,memory_generation:Some(memory.generation().to_string()),
+            })?)?;
+            fs::OpenOptions::new().write(true).open(&pending)?.sync_all()?;
+            memory.publish(&self.workspace)?;
+            atomic_replace(&pending,&metadata)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _=fs::remove_file(&temporary);
+            let _=fs::remove_file(&final_path);
+            let _=fs::remove_file(&pending);
         }
+        result?;
+        sync_directory(&self.workspace).context("Synchronizing phone checkpoint directory")?;
+        if let Some(previous)=previous { remove_checkpoint_files(&self.workspace,previous); }
         Ok(())
     }
 }
+fn read_checkpoint(metadata:&Path) -> Result<SavedCheckpoint> {
+    let saved:SavedCheckpoint=serde_json::from_slice(&fs::read(metadata)?)?;
+    ensure!(saved.format_version==1 && saved_name(&saved.file),"Invalid native saved state metadata");
+    Ok(saved)
+}
+
+fn remove_checkpoint_files(workspace:&Path, saved:SavedCheckpoint) {
+    let _=fs::remove_file(workspace.join(saved.file));
+    if let Some(flash)=saved.flash { flash.remove(workspace); }
+}
+
+fn remove_old_checkpoint(workspace:&Path) {
+    let metadata=workspace.join("phone.saved.json");
+    if let Ok(saved)=read_checkpoint(&metadata) {
+        if fs::remove_file(metadata).is_ok() { remove_checkpoint_files(workspace,saved); }
+    }
+}
+
+/// Export from a phone workspace under its normal session lock.
+pub fn export_internal_memory(workspace:&Path, destination:&Path) -> Result<()> {
+    if !workspace.is_dir() { bail!("No saved K750i internal memory. Run the phone and return to Library first."); }
+    let _lease=Session::lock(workspace)?;
+    let memory=workspace.join(MEMORY_FILE);
+    if memory.exists() { return flash::export_memory(&memory,destination); }
+    let metadata=workspace.join("phone.saved.json");
+    if metadata.is_file() {
+        if let Some(flash)=read_checkpoint(&metadata)?.flash { return flash.export(workspace,destination); }
+    }
+    bail!("No saved K750i internal memory. Run the phone and return to Library first.")
+}
+
+/// Verify the complete backup before replacing flash. An old VM checkpoint
+/// cannot resume against the new generation, including after an interrupted import.
+pub fn import_internal_memory(workspace:&Path, source:&Path) -> Result<()> {
+    fs::create_dir_all(workspace)?;
+    let _lease=Session::lock(workspace)?;
+    PendingMemory::import(workspace,source)?.publish(workspace)?;
+    remove_old_checkpoint(workspace);
+    Ok(())
+}
+
 impl Drop for Session {
     fn drop(&mut self) {
         self.read_engine_log();

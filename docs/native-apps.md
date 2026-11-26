@@ -52,7 +52,9 @@ Desktop Settings keeps a draft until **Save**. **Cancel** or switching tabs
 discards the draft and restores any unsaved fullscreen preview.
 
 Disabling resume boots the firmware from reset with the saved internal storage
-and settings. Enabling resume continues the saved session. Imported moves wait
+and settings. Enabling resume continues the saved session when available. The
+K750i entry menu in Android can export or import `phone-memory.k750mem`; an
+import always starts a fresh boot with the restored storage. Imported moves wait
 for a durable save before deleting the host source. A failed save or changed
 source keeps the original. See [storage](storage.md) for the save format.
 

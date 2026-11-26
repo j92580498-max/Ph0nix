@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! Committed storage for cold boots, published with the VM checkpoint metadata.
+//! Committed K750i flash for cold boots; legacy checkpoint images and portable backups.
 use anyhow::{ensure, Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeMap, fs, io::Read, path::{Path, PathBuf}};
+use std::{collections::BTreeMap, fs, io::{Read, Write}, path::{Path, PathBuf}};
 
 const IMAGES: [(&str, u64, u64); 5] = [
     ("main.bin", 0x44020000, 0x45400000 - 0x44020000),
@@ -69,22 +69,7 @@ impl FlashImages {
         let directory = workspace.join(&self.directory);
         ensure!(inventory(&directory)? == self.images,
             "Internal storage image checksum differs; saved data was kept");
-        ensure!(state.get("nand").is_some_and(Value::is_object),
-            "Internal storage requires the K750 NAND layout");
-        let region = state["regions"].as_array_mut().context("Missing NOR regions")?
-            .iter_mut().find(|region| region["address"].as_u64() == Some(0x44000000)
-                && region["size"].as_u64() == Some(0x2000000))
-            .context("Internal storage requires the K750 NOR layout")?;
-        // Preserve any bootstrap prefix below MAIN. The exported MAIN, FS and
-        // GDFS replace their original seeds, never overlap them.
-        let seeds = region["seeds"].as_array_mut().context("Missing NOR seeds")?;
-        seeds.retain(|seed| seed["address"].as_u64().is_some_and(|address| address < 0x44020000));
-        for (name, address, _) in &IMAGES[..3] {
-            seeds.push(json!({"address": address, "file": directory.join(name)}));
-        }
-        state["nand"]["nand_main_image"] = json!(directory.join("nand-main.bin"));
-        state["nand"]["nand_spare_image"] = json!(directory.join("nand-spare.bin"));
-        Ok(())
+        apply_directory(&directory, state)
     }
 
     pub(crate) fn remove(&self, workspace: &Path) {
@@ -97,17 +82,181 @@ impl FlashImages {
     }
 }
 
+pub(crate) fn apply_directory(directory: &Path, state: &mut Value) -> Result<()> {
+    ensure!(state.get("nand").is_some_and(Value::is_object),
+        "Internal storage requires the K750 NAND layout");
+    let region = state["regions"].as_array_mut().context("Missing NOR regions")?
+        .iter_mut().find(|region| region["address"].as_u64() == Some(0x44000000)
+            && region["size"].as_u64() == Some(0x2000000))
+        .context("Internal storage requires the K750 NOR layout")?;
+    // Preserve any bootstrap prefix below MAIN. The exported MAIN, FS and
+    // GDFS replace their original seeds, never overlap them.
+    let seeds = region["seeds"].as_array_mut().context("Missing NOR seeds")?;
+    seeds.retain(|seed| seed["address"].as_u64().is_some_and(|address| address < 0x44020000));
+    for (name, address, _) in &IMAGES[..3] {
+        seeds.push(json!({"address": address, "file": directory.join(name)}));
+    }
+    state["nand"]["nand_main_image"] = json!(directory.join("nand-main.bin"));
+    state["nand"]["nand_spare_image"] = json!(directory.join("nand-spare.bin"));
+    Ok(())
+}
+
+const MAGIC: &[u8; 8] = b"K750MEM\x01";
+const HEADER_BYTES: u64 = MAGIC.len() as u64 + 16 + 32 * IMAGES.len() as u64;
+const MEMORY_BYTES: u64 = HEADER_BYTES + IMAGES[0].2 + IMAGES[1].2 + IMAGES[2].2 + IMAGES[3].2 + IMAGES[4].2;
+pub(crate) const MEMORY_FILE: &str = "phone-memory.k750mem";
+
+struct MemoryHeader {
+    generation: u128,
+    hashes: [[u8; 32]; IMAGES.len()],
+}
+
+impl MemoryHeader {
+    fn write(&self, mut output: impl Write) -> Result<()> {
+        output.write_all(MAGIC)?;
+        output.write_all(&self.generation.to_le_bytes())?;
+        for hash in &self.hashes { output.write_all(hash)?; }
+        Ok(())
+    }
+}
+
+fn open_memory(path: &Path) -> Result<(fs::File, MemoryHeader)> {
+    let mut input = fs::File::open(path).context("Opening the K750i memory file")?;
+    let metadata = input.metadata()?;
+    ensure!(metadata.is_file() && metadata.len() == MEMORY_BYTES, "Invalid K750i memory file size");
+    let mut magic = [0; MAGIC.len()];
+    input.read_exact(&mut magic)?;
+    ensure!(&magic == MAGIC, "Unsupported K750i memory file format");
+    let mut generation = [0; 16];
+    input.read_exact(&mut generation)?;
+    let mut hashes = [[0; 32]; IMAGES.len()];
+    for hash in &mut hashes { input.read_exact(hash)?; }
+    Ok((input, MemoryHeader { generation: u128::from_le_bytes(generation), hashes }))
+}
+
+pub(crate) fn memory_generation(path: &Path) -> Result<u128> {
+    Ok(open_memory(path)?.1.generation)
+}
+
+fn copy_image(input: &mut impl Read, output: &mut impl Write, mut remaining: u64) -> Result<[u8; 32]> {
+    let mut hash = Sha256::new();
+    let mut buffer = [0; 65536];
+    while remaining != 0 {
+        let count = remaining.min(buffer.len() as u64) as usize;
+        let chunk = &mut buffer[..count];
+        input.read_exact(chunk)?;
+        output.write_all(chunk)?;
+        hash.update(chunk);
+        remaining -= count as u64;
+    }
+    Ok(hash.finalize().into())
+}
+
+fn verify_end(mut input: impl Read) -> Result<()> {
+    ensure!(input.read(&mut [0])? == 0, "K750i memory file has unexpected trailing data");
+    Ok(())
+}
+
+pub(crate) fn unpack_memory(workspace: &Path, path: &Path) -> Result<FlashExport> {
+    let (mut input, header) = open_memory(path)?;
+    let flash = FlashExport::new(workspace)?;
+    for ((name, _, size), expected) in IMAGES.into_iter().zip(header.hashes) {
+        let hash = copy_image(&mut input, &mut fs::File::create(flash.path().join(name))?, size)?;
+        ensure!(hash == expected, "K750i memory checksum differs for {name}");
+    }
+    verify_end(input)?;
+    Ok(flash)
+}
+
+fn pack_memory(directory: &Path, output: &mut fs::File, generation: u128) -> Result<()> {
+    use std::io::{Seek, SeekFrom};
+    let mut header = MemoryHeader { generation, hashes: [[0; 32]; IMAGES.len()] };
+    header.write(&mut *output)?;
+    for ((name, _, size), hash) in IMAGES.into_iter().zip(&mut header.hashes) {
+        let mut input = fs::File::open(directory.join(name))?;
+        ensure!(input.metadata()?.len() == size, "Invalid flash image size for {name}");
+        *hash = copy_image(&mut input, output, size)?;
+        verify_end(input)?;
+    }
+    output.seek(SeekFrom::Start(0))?;
+    header.write(output)
+}
+
+pub(crate) struct PendingMemory { path: PathBuf, generation: u128 }
+impl PendingMemory {
+    fn create(workspace: &Path) -> Result<(Self, fs::File)> {
+        let generation = nonce()?;
+        let path = workspace.join(format!("phone-memory-{generation}-{}.pending", std::process::id()));
+        let file = fs::OpenOptions::new().write(true).create_new(true).open(&path)?;
+        Ok((Self { path, generation }, file))
+    }
+
+    pub(crate) fn pack(workspace: &Path, directory: &Path) -> Result<Self> {
+        let (pending, mut output) = Self::create(workspace)?;
+        pack_memory(directory, &mut output, pending.generation)?;
+        output.sync_all()?;
+        Ok(pending)
+    }
+
+    pub(crate) fn import(workspace: &Path, source: &Path) -> Result<Self> {
+        let (pending, mut output) = Self::create(workspace)?;
+        copy_memory(source, &mut output, Some(pending.generation))?;
+        output.sync_all()?;
+        Ok(pending)
+    }
+
+    pub(crate) fn generation(&self) -> u128 { self.generation }
+
+    pub(crate) fn publish(self, workspace: &Path) -> Result<()> {
+        crate::qmp::atomic_replace(&self.path, &workspace.join(MEMORY_FILE))?;
+        crate::qmp::sync_directory(workspace)?;
+        Ok(())
+    }
+}
+impl Drop for PendingMemory {
+    fn drop(&mut self) { let _ = fs::remove_file(&self.path); }
+}
+
+fn copy_memory(source: &Path, output: &mut fs::File, generation: Option<u128>) -> Result<()> {
+    let (mut input, mut header) = open_memory(source)?;
+    if let Some(generation) = generation { header.generation = generation; }
+    header.write(&mut *output)?;
+    for ((name, _, size), expected) in IMAGES.into_iter().zip(header.hashes) {
+        let hash = copy_image(&mut input, output, size)?;
+        ensure!(hash == expected, "K750i memory checksum differs for {name}");
+    }
+    verify_end(input)
+}
+
+pub(crate) fn export_memory(source: &Path, destination: &Path) -> Result<()> {
+    copy_memory(source, &mut fs::File::create(destination)?, None)
+}
+
+impl FlashImages {
+    pub(crate) fn export(&self, workspace: &Path, destination: &Path) -> Result<()> {
+        ensure!(self.format_version == 1 && generation_name(&self.directory), "Invalid internal storage metadata");
+        let directory = workspace.join(&self.directory);
+        ensure!(inventory(&directory)? == self.images, "Internal storage image checksum differs");
+        pack_memory(&directory, &mut fs::File::create(destination)?, nonce()?)
+    }
+}
+
+fn nonce() -> Result<u128> {
+    Ok(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos())
+}
+
 /// An interrupted export cannot replace the previous published generation.
-pub(crate) struct FlashExport { path: PathBuf, published: bool }
+pub(crate) struct FlashExport { path: PathBuf }
 impl FlashExport {
     pub(crate) fn new(workspace: &Path) -> Result<Self> {
-        let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+        let nonce = nonce()?;
         let path = workspace.join(format!("phone-flash-{nonce}-{}", std::process::id()));
         fs::create_dir(&path)?;
-        Ok(Self { path, published: false })
+        Ok(Self { path })
     }
     pub(crate) fn path(&self) -> &Path { &self.path }
-    pub(crate) fn seal(&self) -> Result<FlashImages> {
+    #[cfg(test)]
+    fn seal(&self) -> Result<FlashImages> {
         let images = inventory(&self.path)?;
         for (name, _, _) in IMAGES {
             fs::OpenOptions::new().write(true).open(self.path.join(name))?.sync_all()?;
@@ -118,10 +267,9 @@ impl FlashExport {
             directory: self.path.file_name().context("Storage directory")?.to_str()
                 .context("Storage directory encoding")?.to_owned(), images })
     }
-    pub(crate) fn publish(&mut self) { self.published = true; }
 }
 impl Drop for FlashExport {
-    fn drop(&mut self) { if !self.published { let _ = fs::remove_dir_all(&self.path); } }
+    fn drop(&mut self) { let _ = fs::remove_dir_all(&self.path); }
 }
 
 #[cfg(test)]
@@ -152,12 +300,11 @@ mod tests {
     fn cold_boot_restores_complete_storage_and_rejects_corruption() {
         use std::io::{Seek, SeekFrom, Write};
         let workspace = Workspace::new();
-        let mut export = FlashExport::new(&workspace.0).unwrap();
+        let export = FlashExport::new(&workspace.0).unwrap();
         fill(&export);
         let mut gdfs = fs::OpenOptions::new().write(true).open(export.path().join("gdfs.bin")).unwrap();
         gdfs.seek(SeekFrom::Start(4096)).unwrap(); gdfs.write_all(b"saved settings").unwrap(); drop(gdfs);
         let saved = export.seal().unwrap();
-        export.publish(); drop(export);
         let saved: FlashImages = serde_json::from_slice(&serde_json::to_vec(&saved).unwrap()).unwrap();
         let mut boot = state(); saved.apply(&workspace.0, &mut boot).unwrap();
         let seeds = boot["regions"][0]["seeds"].as_array().unwrap();
@@ -185,8 +332,8 @@ mod tests {
     #[test]
     fn incomplete_or_failed_export_keeps_previous_generation() {
         let workspace = Workspace::new();
-        let mut old = FlashExport::new(&workspace.0).unwrap(); fill(&old);
-        old.seal().unwrap(); old.publish(); let old_path = old.path().to_owned(); drop(old);
+        let old = FlashExport::new(&workspace.0).unwrap(); fill(&old);
+        old.seal().unwrap(); let old_path = old.path().to_owned();
         let failed_path;
         {
             let failed = FlashExport::new(&workspace.0).unwrap();

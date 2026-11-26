@@ -112,21 +112,38 @@ pub fn prepare(main:&Path, fs_image:&Path, data_dir:&Path) -> Result<PathBuf> {
     Ok(prepare_locked(main,fs_image,data_dir)?.state)
 }
 
+/// Locate the same private storage as a normal boot without provisioning firmware.
+pub fn workspace(main:&Path, fs_image:&Path, data_dir:&Path) -> Result<PathBuf> {
+    let mut archive=ZipArchive::new(Cursor::new(BUNDLE))?;
+    let manifest:Manifest=serde_json::from_slice(&member(&mut archive,"manifest.json")?)?;
+    let (main_entry,fs_entry)=catalog_pair(&manifest)?;
+    workspace_for(main,fs_image,data_dir,main_entry,fs_entry)
+}
+
+fn catalog_pair(manifest:&Manifest) -> Result<(&Entry,&Entry)> {
+    let main=manifest.catalog.entries.iter().find(|e|e.id=="main").context("MAIN catalog")?;
+    let fs=manifest.catalog.entries.iter().find(|e|e.id=="fs").context("FS catalog")?;
+    Ok((main,fs))
+}
+
+fn workspace_for(main:&Path, fs_image:&Path, data_dir:&Path, main_entry:&Entry, fs_entry:&Entry) -> Result<PathBuf> {
+    let identity=sha(format!("{}\n{}\n{}\n{}\n{}",sha(BUNDLE),main_entry.sha256,fs_entry.sha256,
+        fs::canonicalize(main)?.display(),fs::canonicalize(fs_image)?.display()).as_bytes());
+    Ok(data_dir.join("k750i").join(&identity[..24]))
+}
+
 pub fn prepare_locked(main:&Path, fs_image:&Path, data_dir:&Path) -> Result<Prepared> {
     let mut archive=ZipArchive::new(Cursor::new(BUNDLE))?;
     let manifest:Manifest=serde_json::from_slice(&member(&mut archive,"manifest.json")?)?;
     let main_bytes=fs::read(main).with_context(||format!("Reading {}",main.display()))?;
     let fs_bytes=fs::read(fs_image).with_context(||format!("Reading {}",fs_image.display()))?;
-    let main_entry=manifest.catalog.entries.iter().find(|e|e.id=="main").context("MAIN catalog")?;
-    let fs_entry=manifest.catalog.entries.iter().find(|e|e.id=="fs").context("FS catalog")?;
+    let (main_entry,fs_entry)=catalog_pair(&manifest)?;
     let mut main_records=records(&main_bytes,main_entry)?;
     // Apply only declared, byte-checked compatibility to the private mapped
     // copy after authenticating every original container and payload byte.
     patch_records(&mut main_records, &manifest.main_patches)?;
     let fs_records=records(&fs_bytes,fs_entry)?;
-    let identity=sha(format!("{}\n{}\n{}\n{}\n{}",sha(BUNDLE),main_entry.sha256,fs_entry.sha256,
-        fs::canonicalize(main)?.display(),fs::canonicalize(fs_image)?.display()).as_bytes());
-    let workspace=data_dir.join("k750i").join(&identity[..24]);
+    let workspace=workspace_for(main,fs_image,data_dir,main_entry,fs_entry)?;
     fs::create_dir_all(&workspace)?;
     let lease=fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
         .open(workspace.join("session.lock"))?;

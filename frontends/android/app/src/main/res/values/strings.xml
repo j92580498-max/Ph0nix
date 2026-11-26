@@ -44,4 +44,16 @@
     <string name="nand_auto_description">Use the OneNAND file next to the CLA image, if present, or erased flash.</string>
     <string name="lcd_not_emulated">No LCD frame has been drawn by the firmware yet.</string>
     <string name="firmware_picker_description">Choose a phone profile, its firmware image and matching companion files.</string>
+    <string name="k750_memory_export">Export internal memory…</string>
+    <string name="k750_memory_import">Import internal memory…</string>
+    <string name="k750_memory_import_title">Load K750i internal memory?</string>
+    <string name="k750_memory_import_confirm">The file will replace the saved internal memory for this phone. The next launch will start the phone with the imported data.</string>
+    <string name="k750_memory_choose">Choose file</string>
+    <string name="k750_memory_working">Copying K750i internal memory…</string>
+    <string name="k750_memory_imported">K750i internal memory loaded. Run the phone to use it.</string>
+    <string name="k750_memory_exported">K750i internal memory file saved.</string>
+    <string name="k750_memory_missing_entry">This K750i entry no longer exists.</string>
+    <string name="k750_memory_open_failed">Could not open the selected file.</string>
+    <string name="k750_memory_too_large">The file is too large to be a K750i memory backup.</string>
+    <string name="k750_memory_failed">K750i memory transfer failed: %1$s</string>
 </resources>

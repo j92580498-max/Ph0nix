@@ -25,6 +25,7 @@ import com.google.android.material.snackbar.Snackbar
 import com.google.android.material.tabs.TabLayout
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.switchmaterial.SwitchMaterial
+import java.io.File
 import org.json.JSONArray
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -38,6 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var status: TextView
     private lateinit var importButton: FloatingActionButton
     private var pendingNandEntryId: String? = null
+    private var pendingMemoryEntryId: String? = null
     private var importDevice = "k750i"
     private var busy = false
     private lateinit var preferences: AppPreferences
@@ -59,10 +61,19 @@ class MainActivity : AppCompatActivity() {
         if (uri != null && entryId != null) attachOneNand(entryId, uri)
     }
 
+    private val exportMemoryDocument = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri -> finishMemorySelection(uri, importing = false) }
+
+    private val importMemoryDocument = registerForActivityResult(
+        ActivityResultContracts.OpenDocument(),
+    ) { uri -> finishMemorySelection(uri, importing = true) }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         preferences = AppPreferences(this)
         pendingNandEntryId = savedInstanceState?.getString(STATE_NAND_ENTRY)
+        pendingMemoryEntryId = savedInstanceState?.getString(STATE_MEMORY_ENTRY)
         importDevice = savedInstanceState?.getString(STATE_IMPORT_DEVICE)
             ?.takeIf { DeviceProfiles.find(it) != null } ?: importDevice
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -82,6 +93,8 @@ class MainActivity : AppCompatActivity() {
             onRun = ::runFirmware,
             onSelectOneNand = ::chooseOneNand,
             onUseErasedFlash = ::useAutomaticNand,
+            onExportMemory = ::chooseMemoryExport,
+            onImportMemory = ::confirmMemoryImport,
             onRemove = ::confirmRemove,
         )
         recycler.adapter = adapter
@@ -115,6 +128,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_NAND_ENTRY, pendingNandEntryId)
+        outState.putString(STATE_MEMORY_ENTRY, pendingMemoryEntryId)
         outState.putString(STATE_IMPORT_DEVICE, importDevice)
         outState.putInt("tab", tabs.selectedTabPosition)
         super.onSaveInstanceState(outState)
@@ -343,6 +357,84 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun chooseMemoryExport(entry: FirmwareEntry) {
+        if (busy) return
+        pendingMemoryEntryId = entry.id
+        exportMemoryDocument.launch("phone-memory.k750mem")
+    }
+
+    private fun confirmMemoryImport(entry: FirmwareEntry) {
+        if (busy) return
+        com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+            .setTitle(R.string.k750_memory_import_title)
+            .setMessage(R.string.k750_memory_import_confirm)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.k750_memory_choose) { _, _ ->
+                pendingMemoryEntryId = entry.id
+                importMemoryDocument.launch(arrayOf("*/*"))
+            }
+            .show()
+    }
+
+    private fun finishMemorySelection(uri: Uri?, importing: Boolean) {
+        val entryId = pendingMemoryEntryId
+        pendingMemoryEntryId = null
+        if (uri == null || entryId == null || busy) return
+        setBusy(true)
+        status.setText(R.string.k750_memory_working)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    val entry = library.entries().firstOrNull { it.id == entryId && it.device == "k750i" }
+                        ?: error(getString(R.string.k750_memory_missing_entry))
+                    val staged = File.createTempFile("k750-memory-", ".k750mem", cacheDir)
+                    try {
+                        if (importing) {
+                            val source = contentResolver.openInputStream(uri)
+                                ?: error(getString(R.string.k750_memory_open_failed))
+                            source.use { input ->
+                                staged.outputStream().use { output ->
+                                    val buffer = ByteArray(64 * 1024)
+                                    var total = 0L
+                                    while (true) {
+                                        val count = input.read(buffer)
+                                        if (count == -1) break
+                                        total += count
+                                        check(total <= MAX_MEMORY_FILE_BYTES) { getString(R.string.k750_memory_too_large) }
+                                        output.write(buffer, 0, count)
+                                    }
+                                }
+                            }
+                        }
+                        val failure = NativeBridge.nativeTransferInternalMemory(
+                            entry.selectionJson(), File(filesDir, "sessions").absolutePath,
+                            staged.absolutePath, importing,
+                        )
+                        check(failure.isEmpty()) { failure }
+                        if (!importing) {
+                            val destination = contentResolver.openOutputStream(uri, "wt")
+                                ?: error(getString(R.string.k750_memory_open_failed))
+                            destination.use { output -> staged.inputStream().use { it.copyTo(output) } }
+                        }
+                    } finally {
+                        staged.delete()
+                    }
+                }
+            }
+            setBusy(false)
+            result.fold(
+                onSuccess = {
+                    status.setText(if (importing) R.string.k750_memory_imported else R.string.k750_memory_exported)
+                },
+                onFailure = { error ->
+                    val message = getString(R.string.k750_memory_failed, error.localizedMessage ?: "")
+                    status.text = message
+                    showMessage(message)
+                },
+            )
+        }
+    }
+
     private fun runFirmware(entry: FirmwareEntry) {
         if (busy) return
         startActivity(
@@ -390,6 +482,8 @@ class MainActivity : AppCompatActivity() {
 
     private companion object {
         const val STATE_NAND_ENTRY = "pendingNandEntryId"
+        const val STATE_MEMORY_ENTRY = "pendingMemoryEntryId"
+        const val MAX_MEMORY_FILE_BYTES = 65L * 1024 * 1024
         const val STATE_IMPORT_DEVICE = "importDevice"
     }
 }

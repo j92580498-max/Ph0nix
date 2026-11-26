@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! Check native file transfer across save/resume or a saved-storage cold boot.
+//! Check native file transfer across resume or a cold boot from a portable memory file.
 use anyhow::{ensure, Context, Result};
 use db2010_host::{
     prepare,
-    qmp::Session,
+    qmp::{export_internal_memory, import_internal_memory, Session},
     storage::{FileEntry, FileJob, FileRequest},
     HostOptions, LcdFrame,
 };
 use std::{
     fs,
+    io::{Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
     thread,
     time::{Duration, Instant},
@@ -183,18 +184,35 @@ fn internal_other(session: &mut Session) -> Result<Vec<String>> {
     }
 }
 
+fn assert_no_checkpoint(workspace: &Path) -> Result<()> {
+    for entry in fs::read_dir(workspace)? {
+        let name = entry?.file_name();
+        let name = name.to_string_lossy();
+        ensure!(name != "phone.saved.json" && !name.ends_with(".vmstate"),
+            "Memory-only save unexpectedly created {name}");
+    }
+    Ok(())
+}
+
+fn memory_generation(workspace: &Path) -> Result<[u8; 24]> {
+    let mut header = [0; 24];
+    fs::File::open(workspace.join("phone-memory.k750mem"))?.read_exact(&mut header)?;
+    Ok(header)
+}
+
 fn main() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
     let engine = PathBuf::from(args.next().context(
         "Usage: phone-files-resume ENGINE COPIED_STATE CHECKPOINT [cold-boot] | ENGINE --fresh DATA_DIR MAIN FS",
     )?);
     let input = args.next().context("Copied prepared state or --fresh required")?;
-    let (state, checkpoint, cold_boot) = if input == "--fresh" {
+    let (state, checkpoint, cold_boot, fresh) = if input == "--fresh" {
         let data = PathBuf::from(args.next().context("New data directory required")?);
         let main = PathBuf::from(args.next().context("K750i MAIN required")?);
         let fs_image = PathBuf::from(args.next().context("K750i FS required")?);
         ensure!(!data.exists(), "Fresh test requires a new data directory");
-        (prepare::prepare(&main, &fs_image, &data)?, None, true)
+        let state = prepare::prepare(&main, &fs_image, &data)?;
+        (state, None, true, Some((data, main, fs_image)))
     } else {
         let checkpoint = PathBuf::from(args.next().context("Starting checkpoint required")?);
         let cold_boot = match args.next() {
@@ -204,7 +222,7 @@ fn main() -> Result<()> {
                 true
             }
         };
-        (PathBuf::from(input), Some(checkpoint), cold_boot)
+        (PathBuf::from(input), Some(checkpoint), cold_boot, None)
     };
     ensure!(args.next().is_none(), "Unexpected arguments");
     let workspace = state
@@ -247,9 +265,48 @@ fn main() -> Result<()> {
             serde_json::json!({"phase":"before_save","files":session.files.snapshot()})
         );
         // Deliberately leave the file service connected; Session owns safe quiescence.
-        session.save()?;
+        session.save_with_resume(!cold_boot)?;
     }
+    let state = if cold_boot {
+        if fresh.is_some() {
+            assert_no_checkpoint(&workspace)?;
+        }
+        let backup = workspace.join("exported.k750mem");
+        export_internal_memory(&workspace, &backup)?;
+        let restored = if let Some((data, main, fs_image)) = fresh {
+            let data = data.join("restored");
+            let target = prepare::workspace(&main, &fs_image, &data)?;
+            ensure!(!target.exists(), "Restore requires an empty phone workspace");
+            import_internal_memory(&target, &backup)?;
+            let state = prepare::prepare(&main, &fs_image, &data)?;
+            ensure!(state.parent() == Some(target.as_path()), "Restore and boot chose different workspaces");
+            assert_no_checkpoint(&target)?;
+            state
+        } else {
+            import_internal_memory(&workspace, &backup)?;
+            state
+        };
+        let target = restored.parent().context("Restored workspace required")?;
+        let before = memory_generation(target)?;
+        // Corrupt the final NAND spare byte without changing the file size or header.
+        let mut corrupt = fs::OpenOptions::new().read(true).write(true).open(&backup)?;
+        corrupt.seek(SeekFrom::End(-1))?;
+        let mut byte = [0];
+        corrupt.read_exact(&mut byte)?;
+        corrupt.seek(SeekFrom::End(-1))?;
+        corrupt.write_all(&[byte[0] ^ 1])?;
+        drop(corrupt);
+        let failure = import_internal_memory(target, &backup).expect_err("Corrupt memory file was accepted");
+        ensure!(failure.to_string().contains("checksum"), "Unexpected import failure: {failure:#}");
+        ensure!(memory_generation(target)? == before, "Failed import replaced the good memory file");
+        fs::remove_file(backup)?;
+        println!("{}", serde_json::json!({"memory_file_export_import":"passed","corrupt_import_rejected":true}));
+        restored
+    } else {
+        state
+    };
     {
+        let workspace = state.parent().context("Boot workspace required")?.to_owned();
         let options = HostOptions {
             engine,
             data_dir: workspace.clone(),
@@ -295,7 +352,10 @@ fn main() -> Result<()> {
             "{}",
             serde_json::json!({"phase":"after_restart","files":session.files.snapshot()})
         );
-        session.save()?;
+        session.save_with_resume(!cold_boot)?;
+        if cold_boot && checkpoint.is_none() {
+            assert_no_checkpoint(&workspace)?;
+        }
     }
     if cold_boot {
         println!("{}", serde_json::json!({"save_cold_boot_roundtrip":"passed"}));
