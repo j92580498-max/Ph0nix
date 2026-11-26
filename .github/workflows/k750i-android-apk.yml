@@ -34,10 +34,26 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
-      - uses: android-actions/setup-android@v3
-        with:
-          packages: 'platforms;android-35 build-tools;35.0.0 ndk;29.0.14206865'
-          log-accepted-android-sdk-licenses: false
+      - name: Install the Android SDK and NDK
+        run: |
+          sdk="$HOME/.android/ph0nix-sdk"
+          bash frontends/android/build-support/install_test_sdk.sh "$sdk"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+      - name: Select a reachable Google Maven repository
+        run: |
+          pom=com/android/tools/build/gradle/8.13.1/gradle-8.13.1.pom
+          if ! curl --fail --silent --connect-timeout 7 --max-time 12 --output /dev/null "https://dl.google.com/dl/android/maven2/$pom"; then
+            for mirror in https://maven.aliyun.com/repository/google https://mirrors.huaweicloud.com/repository/maven; do
+              if curl --fail --silent --connect-timeout 7 --max-time 12 --output /dev/null "$mirror/$pom"; then
+                echo "Using Google Maven mirror: $mirror"
+                echo "FEATUREPHONE_GOOGLE_MAVEN=$mirror" >> "$GITHUB_ENV"
+                exit 0
+              fi
+            done
+            echo 'Google Maven and both mirrors are unreachable from this runner.' >&2
+            exit 1
+          fi
       - name: Prepare the build tools and pinned QEMU source
         run: |
           python3 -m db2010.development.source init

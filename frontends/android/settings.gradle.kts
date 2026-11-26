@@ -1,6 +1,7 @@
 pluginManagement {
     repositories {
-        google()
+        val googleMirror = providers.environmentVariable("FEATUREPHONE_GOOGLE_MAVEN").orNull
+        if (googleMirror == null) google() else maven { url = uri(googleMirror) }
         mavenCentral()
         gradlePluginPortal()
     }
@@ -9,7 +10,8 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
-        google()
+        val googleMirror = providers.environmentVariable("FEATUREPHONE_GOOGLE_MAVEN").orNull
+        if (googleMirror == null) google() else maven { url = uri(googleMirror) }
         mavenCentral()
     }
 }
