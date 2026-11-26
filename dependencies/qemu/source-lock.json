@@ -585,15 +585,19 @@
     },
     {
       "path": "patches/0011-ph0nix-memorystick-detect-probe.patch",
-      "sha256": "56f23bf330f6042475baf4ac657fbd4d8cc45d08829b0165f2dad6d7bebda509",
+      "sha256": "02151e571e4b3e4e2d03e07f6651eb9b4ff027ad906cf4a3f810176de2ec9f0e",
       "files": {
-        "hw/arm/db2010-checkpoint.c": "c7cd51e15999da90f50d538d736c368d1555b166a978d7ffcfb07d485e88ccc3",
-        "hw/arm/db2010-components.h": "61db5a8ac8ff4dc13056a79d197ed747f434d378412ad005e7cbe62117e99e87",
+        "hw/arm/db2010-checkpoint.c": "de0e2508ed954a5c4875ba54b66ca790ea10e09f604fba3b9056d739e5fdac0d",
+        "hw/arm/db2010-components.h": "fa6a7234d9711f8251ef9c57e574be8fd29b6aceccba472b242f50f4a2dbc283",
+        "hw/arm/db2010-device.c": "c10e6a57a67ab1cd1362524fc26db1df7f9862fa362845980eaf212bf36d68df",
+        "hw/arm/db2010-memorystick.c": "bba25ab21499a5f729badc07a03fa1bd0a5912f257089d4ab15efecb5d3ce541",
+        "hw/arm/db2010-memorystick.h": "8b88ab926e43c83aa34f4955e84f16702adaaefbf324477c76d65886ea5e897e",
         "hw/arm/db2010-observe.c": "63d8c32e60d0cab71815d8409f51033c55909cd0615f09406f5065065c4da0b5",
-        "hw/arm/db2010-register-bank.c": "db15d78b5e149d8c2f2fd357025078c7d0c6fee2952666267f64954c17bf056b",
-        "hw/arm/db2010-timer.c": "6f9dae90061e61e95010a8b04de5f1d680fec459e4bf5c00dc0a7eb16fc4862c",
-        "hw/arm/db2010-timer.h": "ad904caf579dcfb0820e47d3f485a1a8d16479305e70ba6c2667fa233571ae11",
-        "hw/arm/db2010.c": "e03051641956e65da9e50cf3be6ee02f345e508427571ed8dd2a2d57fea0565f"
+        "hw/arm/db2010-register-bank.c": "02eb37301dd45520875f938342aaaa21e556ce9f2de76ae5ff20a18832441b98",
+        "hw/arm/db2010-timer.c": "ea0a2b0ace12110f3ded1d8c516cd102ca9cccef4315080e36a4fbb744af9461",
+        "hw/arm/db2010-timer.h": "d7a5f8de74467fb58fd9262c1faa678b9f3b63998dafb96e43034aa88b9e25c1",
+        "hw/arm/db2010.c": "6731a29d20efa47c476a2e365630b00f7d1100d9c3656edf0958a1124fbb624b",
+        "hw/arm/meson.build": "e3c354a21ff3fcf68ed8f69e4b2ab07d0db11a56b9cb7a7bef7ad6163a501bf7"
       }
     }
   ],

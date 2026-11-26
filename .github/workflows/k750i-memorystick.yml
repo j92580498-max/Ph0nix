@@ -1,4 +1,4 @@
-name: K750i Memory Stick probe
+name: K750i Memory Stick storage
 on:
   push:
     branches: [test/k750i-memorystick]
@@ -27,18 +27,23 @@ jobs:
             python3 -m db2010.development.source init
           fi
       - name: Build the Linux engine on CT100
+        id: engine
         run: |
           python3 -m venv build/k750i-test-tools
           tools="$PWD/build/k750i-test-tools/bin"
-          "$tools/python" -m pip install meson==1.11.1 pytest==8.4.2
+          "$tools/python" -m pip install meson==1.11.1 pytest==8.4.2 \
+            numpy==2.3.4 pyarrow==26.0.0 duckdb==1.5.6
           export PATH="$tools:$PATH"
           if ! "$tools/python" -m db2010.development.build --configure --jobs 2; then
             find build/provenance/qemu -type f -name build.log -exec tail -n 80 {} \; || true
             exit 1
           fi
-      - name: Check the empty slot
-        run: build/k750i-test-tools/bin/python -m pytest -q tests/test_memorystick_slot.py
-      - name: Insert the diagnostic card in R1DB001
+      - name: Check the empty slot and register bank
+        run: |
+          build/k750i-test-tools/bin/python -m pytest -q \
+            tests/test_memorystick_slot.py tests/test_migrated_maps.py::test_configured_register_views
+      - name: Read, write and reboot with a Memory Stick in R1DB001
+        if: ${{ !cancelled() && steps.engine.outcome == 'success' }}
         run: |
           work="$(mktemp -d "$RUNNER_TEMP/ph0nix-memorystick.XXXXXXXX")"
           trap 'rm -rf -- "$work"' EXIT
