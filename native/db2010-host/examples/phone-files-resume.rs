@@ -4,7 +4,7 @@ use anyhow::{ensure, Context, Result};
 use db2010_host::{
     prepare,
     qmp::Session,
-    storage::{FileJob, FileRequest},
+    storage::{FileEntry, FileJob, FileRequest},
     HostOptions, LcdFrame,
 };
 use std::{
@@ -57,7 +57,12 @@ fn capture_panel(session: &mut Session, name: &str) -> Result<()> {
             .step_by(2)
             .map(|i| u8::from_str_radix(&hex[i..i + 2], 16))
             .collect::<Result<Vec<_>, _>>()?;
-        let frame = LcdFrame { width: 176, height: 220, rgb565_be, revision: 0 };
+        let frame = LcdFrame {
+            width: 176,
+            height: 220,
+            rgb565_be,
+            revision: 0,
+        };
         let directory = PathBuf::from(directory);
         fs::create_dir_all(&directory)?;
         let mut ppm = format!("P6\n{} {}\n255\n", frame.width, frame.height).into_bytes();
@@ -73,7 +78,14 @@ fn report_boot_failure(session: &mut Session, workspace: &Path, phase: &str) {
     }
     let snapshot = (|| -> Result<()> {
         let progress = session.progress()?;
-        eprintln!("{phase} failure progress: {progress}");
+        eprintln!(
+            "{phase} failure progress: {}",
+            serde_json::json!({
+                "running": progress["running"], "pc": progress["pc"],
+                "virtual_ns": progress["virtual_ns"], "serial_input_ready": progress["serial_input_ready"],
+                "serial_cable_present": progress["serial_cable_present"]
+            })
+        );
         if progress["running"].as_bool() == Some(true) {
             session.qmp.execute("stop", serde_json::json!({}))?;
         }
@@ -126,6 +138,51 @@ fn wait_for_serial(
     }
 }
 
+fn finish_first_setup(session: &mut Session) -> Result<()> {
+    // The fresh R1DB001 test on CT100 reaches the language-selection page.
+    // Select the highlighted language, decline the wizard, acknowledge its message.
+    for (step, key) in [
+        ("language", "soft-left"),
+        ("skip-wizard", "soft-right"),
+        ("acknowledge", "soft-left"),
+    ] {
+        session.contacts(&[key])?;
+        thread::sleep(Duration::from_millis(150));
+        session.contacts(&[])?;
+        thread::sleep(Duration::from_secs(3));
+        capture_panel(session, &format!("initial-boot-after-{step}"))?;
+    }
+    Ok(())
+}
+
+fn list(session: &mut Session, path: Vec<String>) -> Result<Vec<FileEntry>> {
+    run(session, FileRequest::List { path: path.clone() })?;
+    let entries = session.files.snapshot().entries;
+    println!("{}", serde_json::json!({"path":path,"entries":entries}));
+    Ok(entries)
+}
+
+fn find_folder<'a>(entries: &'a [FileEntry], names: &[&str]) -> Option<&'a str> {
+    entries.iter().find(|entry| {
+        entry.directory && names.iter().any(|name| entry.name.to_lowercase() == name.to_lowercase())
+    }).map(|entry| entry.name.as_str())
+}
+
+fn internal_other(session: &mut Session) -> Result<Vec<String>> {
+    let root = list(session, vec![])?;
+    let other_names = ["Other", "Прочее", "Другое"];
+    if let Some(memory) = find_folder(&root, &["Phone memory", "Память телефона"]) {
+        let entries = list(session, vec![memory.to_owned()])?;
+        let other = find_folder(&entries, &other_names).context("No Other directory in phone memory")?;
+        Ok(vec![memory.to_owned(), other.to_owned()])
+    } else {
+        // With no Memory Stick controller in this test, the PC Suite root can
+        // expose the internal user directories directly.
+        let other = find_folder(&root, &other_names).context("No internal Other directory in OBEX root")?;
+        Ok(vec![other.to_owned()])
+    }
+}
+
 fn main() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
     let engine = PathBuf::from(args.next().context(
@@ -159,24 +216,23 @@ fn main() -> Result<()> {
         &source,
         b"ph0nix file transfer remains usable after save and resume\n",
     )?;
-    let directory = vec!["Phone memory".to_owned(), "Other".to_owned()];
-    let mut path = directory.clone();
-    path.push("ph0nix-resume-test.txt".into());
+    let directory;
+    let path;
     {
         println!("{}", serde_json::json!({"phase":"initial_boot","state":state}));
         let mut session = Session::open(&engine, &state, checkpoint.as_deref())?;
         if checkpoint.is_none() {
             wait_for_serial(&mut session, &workspace, "initial-boot", 240)?;
+            finish_first_setup(&mut session)?;
         }
-        if let Err(error) = run(
-            &mut session,
-            FileRequest::List {
-                path: directory.clone(),
-            },
-        ) {
-            report_boot_failure(&mut session, &workspace, "initial-boot");
-            return Err(error);
-        }
+        directory = match internal_other(&mut session) {
+            Ok(directory) => directory,
+            Err(error) => {
+                report_boot_failure(&mut session, &workspace, "initial-boot");
+                return Err(error);
+            }
+        };
+        path = [directory.clone(), vec!["ph0nix-resume-test.txt".into()]].concat();
         run(
             &mut session,
             FileRequest::Import {
@@ -201,7 +257,7 @@ fn main() -> Result<()> {
         };
         let mut session = Session::start(&options, &state)?;
         if cold_boot {
-            wait_for_serial(&mut session, &workspace, "cold-boot", 90)?;
+            wait_for_serial(&mut session, &workspace, "cold-boot", 150)?;
         }
         if let Err(error) = run(
             &mut session,
