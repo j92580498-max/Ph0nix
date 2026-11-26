@@ -146,9 +146,9 @@ def main():
             run(['cmake','--install',target],directory,env)
         else:
             target=args.build/'glib-build'
-            meson=ROOT/'qemu/build/pyvenv/bin/meson'
-            if not meson.is_file():
-                meson=shutil.which('meson') or ROOT/'.venv/bin/meson'
+            # Use the active build environment; the QEMU build directory can
+            # contain an incomplete virtual environment from an earlier job.
+            meson=shutil.which('meson') or ROOT/'.venv/bin/meson'
             if not Path(meson).is_file():
                 raise RuntimeError('Meson is required to build GLib. Install meson==1.11.1 in the build Python environment.')
             text=(directory/'meson.options' if (directory/'meson.options').is_file() else directory/'meson_options.txt').read_text()
