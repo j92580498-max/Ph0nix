@@ -460,11 +460,10 @@ class MainActivity : AppCompatActivity() {
             launchFirmware(entry, null)
             return
         }
-        val cards = File(filesDir, "cards").listFiles()
-            ?.filter { it.isFile && it.extension.equals("img", ignoreCase = true) }
-            ?.sortedWith(compareBy<File> { it.name != preferences.phoneCard(entry.id) }.thenBy { it.name }).orEmpty()
+        val lastCard = preferences.phoneCard(entry.id)
+        val cards = MemoryStickImages.list(MemoryStickImages.directory(filesDir)).sortedBy { it.name != lastCard }
         val choices = listOf("Start without a card", "Create a card and start…", "Import an image and start…") +
-            cards.map { "${it.name} (${it.length() / 1048576} MiB)" }
+            cards.map(MemoryStickImages::label)
         MaterialAlertDialogBuilder(this).setTitle("K750i Memory Stick")
             .setItems(choices.toTypedArray()) { _, index ->
                 when (index) {
@@ -495,14 +494,16 @@ class MainActivity : AppCompatActivity() {
                 runCatching {
                     val entry = library.entries().firstOrNull { it.id == entryId && it.device == "k750i" }
                         ?: error(getString(R.string.k750_memory_missing_entry))
-                    val directory = File(filesDir, "cards")
+                    val directory = MemoryStickImages.directory(filesDir)
                     check(directory.isDirectory || directory.mkdirs()) { "Could not create the card images folder." }
-                    val image = File(directory, "card-${UUID.randomUUID()}.img")
+                    val id = UUID.randomUUID()
+                    val image = File(directory, "${if (source == null) "card" else "imported"}-$id.img")
+                    val staged = File(directory, ".$id.tmp")
                     try {
                         if (source != null) {
                             val input = contentResolver.openInputStream(source) ?: error("Could not open the card image.")
                             input.use {
-                                image.outputStream().use { output ->
+                                staged.outputStream().use { output ->
                                     val buffer = ByteArray(64 * 1024)
                                     var total = 0L
                                     while (true) {
@@ -515,15 +516,16 @@ class MainActivity : AppCompatActivity() {
                                 }
                             }
                         }
-                        val request = JSONObject().put("image", image.absolutePath)
+                        val request = JSONObject().put("image", staged.absolutePath)
                             .put("operation", if (source == null) "create" else "info")
                         if (source == null) request.put("size_mib", requireNotNull(sizeMib))
                         val response = JSONObject(NativeBridge.nativeCardRequest(request.toString()))
                         check(!response.has("error")) { response.optString("error") }
-                    } catch (error: Exception) {
-                        image.delete()
-                        throw error
+                        check(staged.renameTo(image)) { "Could not save the card image." }
+                    } finally {
+                        staged.delete()
                     }
+                    notifyMemoryStickChanged(this@MainActivity, image.name)
                     entry to image
                 }
             }
@@ -535,11 +537,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun launchFirmware(entry: FirmwareEntry, card: File?) {
         if (entry.device == "k750i" && card != null) {
-            val previous = preferences.phoneCard(entry.id)
-            if (previous != card.name) {
-                preferences.rememberPhoneCard(entry.id, card.name)
-                notifyMemoryStickSelectionChanged(this, entry.id, previous)
-            }
+            preferences.rememberPhoneCard(entry.id, card.name)
         }
         startActivity(
             Intent(this, EmulatorActivity::class.java)

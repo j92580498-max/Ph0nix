@@ -33,7 +33,7 @@ import java.util.UUID
 @RequiresApi(26)
 class PhoneDocumentsProvider : DocumentsProvider() {
     private val app: Context get() = requireNotNull(context)
-    private val cards: File get() = File(app.filesDir, "cards")
+    private val cards: File get() = MemoryStickImages.directory(app.filesDir)
     private val mutations = Any()
     private val writers = mutableMapOf<String, Any>()
     private val writeHandler by lazy {
@@ -60,7 +60,10 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         MatrixCursor(projection ?: DOCUMENT_COLUMNS).apply {
             when {
                 doc.isInboxFile -> addInboxFile(doc, PhoneInbox.get(inbox(phone), doc.name))
-                doc.isCardRoot -> addDocument(doc, phone, cardIssue = cardIssue(doc))
+                doc.isCardRoot -> {
+                    val image = image(doc)
+                    addDocument(doc, phone, card = image, cardIssue = cardIssue(doc, image))
+                }
                 else -> addDocument(doc, phone, if (doc.isCardFile) entry(doc) else null)
             }
         }
@@ -76,11 +79,19 @@ class PhoneDocumentsProvider : DocumentsProvider() {
             when {
                 parent.isRoot -> phones().forEach { addDocument(parent.child(it.id), it) }
                 parent.isPhone -> {
-                    val machine = requireNotNull(phone)
-                    val card = parent.child(StorageDocument.cardComponent(selectedCard(machine)?.name))
                     setExtras(message(DocumentsContract.EXTRA_INFO, R.string.phone_documents_choose_storage))
-                    addDocument(card, machine, cardIssue = cardIssue(card))
-                    addDocument(parent.child(StorageDocument.INBOX), machine)
+                    addDocument(parent.child(StorageDocument.CARD), phone)
+                    addDocument(parent.child(StorageDocument.INBOX), phone)
+                }
+                parent.isCardList -> {
+                    val images = MemoryStickImages.list(cards)
+                    setExtras(message(DocumentsContract.EXTRA_INFO, if (images.isEmpty()) {
+                        R.string.card_documents_empty
+                    } else R.string.card_documents_choose_card))
+                    images.forEach { image ->
+                        val card = parent.child(image.name)
+                        addDocument(card, phone, card = image, cardIssue = cardIssue(card, image))
+                    }
                 }
                 parent.isInbox -> {
                     setExtras(message(DocumentsContract.EXTRA_INFO, R.string.phone_inbox_summary))
@@ -118,6 +129,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         val phone = phone(child)
         when {
             child.isInboxFile -> PhoneInbox.get(inbox(phone), child.name)
+            child.isCardRoot -> image(child)
             child.isCardFile -> entry(child)
         }
         val ids = (parent.parts.size..child.parts.size).map { child.ancestor(it).id }
@@ -130,8 +142,8 @@ class PhoneDocumentsProvider : DocumentsProvider() {
             if (mimeType == Document.MIME_TYPE_DIR) throw IOException(app.getString(R.string.phone_inbox_files_only))
             return@documentIo parent.child(PhoneInbox.create(inbox(phone(parent)), displayName).id).id
         }
+        if (parent.isCardList) throw IOException(app.getString(R.string.card_documents_choose_card))
         if (!parent.isCard) throw IOException(app.getString(R.string.phone_documents_choose_storage))
-        image(parent) // An empty Memory Stick folder has no image to edit.
         val document = parent.child(displayName.trim())
         if (document.name.last() == '.' || document.name.any { it < ' ' || it in "\"*:<>?|" }) {
             throw IOException("This name is not valid on a Memory Stick.")
@@ -252,11 +264,6 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         (card.name + "/" + document.fatPath.joinToString("/")).lowercase(Locale.ROOT)
 
     private fun entry(document: StorageDocument): JSONObject? {
-        if (document.isRoot) return null
-        if (document.fatPath.isEmpty()) {
-            image(document)
-            return null
-        }
         val entries = list(document.parent())
         for (index in 0 until entries.length()) {
             val entry = entries.getJSONObject(index)
@@ -300,8 +307,8 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         response
     }
 
-    private fun cardIssue(document: StorageDocument): String? = try {
-        request(document, "info", snapshot = false)
+    private fun cardIssue(document: StorageDocument, image: File): String? = try {
+        request(document, "info", snapshot = false, card = image)
         null
     } catch (error: IOException) {
         error.message ?: app.getString(R.string.card_documents_missing)
@@ -320,23 +327,14 @@ class PhoneDocumentsProvider : DocumentsProvider() {
     private fun inbox(phone: FirmwareEntry?) = PhoneInbox.directory(requireNotNull(phone).directory)
 
     private fun image(document: StorageDocument): File {
-        val machine = requireNotNull(phone(document))
-        val card = selectedCard(machine)
-        if (card == null || document.cardName != card.name) {
-            throw IOException(app.getString(R.string.card_documents_missing))
-        }
-        return card
-    }
-
-    private fun selectedCard(phone: FirmwareEntry): File? {
-        val name = AppPreferences(app).phoneCard(phone.id) ?: return null
-        if (!StorageDocument.validComponent(name) || !name.endsWith(".img", ignoreCase = true)) return null
-        val file = File(cards, name)
-        return file.takeIf { it.isFile && it.canonicalFile == File(cards.canonicalFile, name) }
+        phone(document)
+        val card = document.cardName?.let { MemoryStickImages.find(cards, it) }
+        return card ?: throw FileNotFoundException(app.getString(R.string.card_documents_missing))
     }
 
     private fun MatrixCursor.addDocument(
-        document: StorageDocument, phone: FirmwareEntry?, entry: JSONObject? = null, cardIssue: String? = null,
+        document: StorageDocument, phone: FirmwareEntry?, entry: JSONObject? = null,
+        card: File? = null, cardIssue: String? = null,
     ) {
         val directory = entry?.getBoolean("directory") ?: true
         addRow(values(columnNames) { column ->
@@ -346,17 +344,19 @@ class PhoneDocumentsProvider : DocumentsProvider() {
                     document.isRoot -> app.getString(R.string.app_name)
                     document.isPhone -> requireNotNull(phone).name
                     document.isInbox -> app.getString(R.string.phone_inbox_title)
-                    document.isCardRoot -> app.getString(R.string.card_documents_title)
+                    document.isCardList -> app.getString(R.string.card_documents_title)
+                    card != null -> MemoryStickImages.label(card)
                     else -> document.name
                 }
                 Document.COLUMN_SUMMARY -> when {
+                    document.isCardList -> app.getString(R.string.card_documents_choose_card)
                     document.isCardRoot -> cardIssue ?: app.getString(R.string.card_documents_copy_summary)
                     document.isInbox -> app.getString(R.string.phone_inbox_summary)
                     else -> null
                 }
                 Document.COLUMN_MIME_TYPE -> if (directory) Document.MIME_TYPE_DIR else mimeType(document.name)
                 Document.COLUMN_FLAGS -> when {
-                    document.isRoot || document.isPhone || cardIssue != null -> 0
+                    document.isRoot || document.isPhone || document.isCardList || cardIssue != null -> 0
                     document.isInbox || directory -> Document.FLAG_DIR_SUPPORTS_CREATE
                     else -> Document.FLAG_SUPPORTS_WRITE or Document.FLAG_SUPPORTS_DELETE
                 }
@@ -412,15 +412,16 @@ internal class StorageDocument private constructor(val parts: List<String>) {
     val isRoot get() = parts.isEmpty()
     val isPhone get() = parts.size == 1
     private val storage get() = parts.getOrNull(1)
-    val isCard get() = storage == CARD || storage?.startsWith("$CARD:") == true
-    val cardName get() = storage?.takeIf { it.startsWith("$CARD:") }?.removePrefix("$CARD:")
-    val isCardRoot get() = isCard && parts.size == 2
-    val isCardFile get() = isCard && parts.size > 2
+    val isCardList get() = storage == CARD && parts.size == 2
+    val cardName get() = if (storage == CARD) parts.getOrNull(2) else null
+    val isCard get() = cardName != null
+    val isCardRoot get() = isCard && parts.size == 3
+    val isCardFile get() = isCard && parts.size > 3
     val isInbox get() = parts.size == 2 && parts[1] == INBOX
     val isInboxFile get() = parts.size == 3 && parts[1] == INBOX
     val name get() = parts.last()
     val id get() = if (isRoot) ROOT else "$ROOT/${parts.joinToString("/")}"
-    val fatPath get() = parts.drop(2)
+    val fatPath get() = parts.drop(3)
 
     fun contains(other: StorageDocument) = other.parts.take(parts.size) == parts
     fun ancestor(size: Int) = StorageDocument(parts.take(size))
@@ -434,12 +435,10 @@ internal class StorageDocument private constructor(val parts: List<String>) {
         const val ROOT = "phones"
         const val CARD = "card"
         const val INBOX = "inbox"
-        private const val MAX_COMPONENTS = 34 // phone ID, storage type and up to 32 FAT components
+        private const val MAX_COMPONENTS = 35 // phone ID, storage type, image and up to 32 FAT components
         private val UUID_PATTERN = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
 
         fun validId(id: String) = UUID_PATTERN.matches(id)
-
-        fun cardComponent(name: String?) = if (name == null) CARD else "$CARD:$name"
 
         fun parse(id: String): StorageDocument {
             if (id == ROOT) return StorageDocument(emptyList())
@@ -448,9 +447,10 @@ internal class StorageDocument private constructor(val parts: List<String>) {
             val type = parts.getOrNull(1)
             val validStorage = when (type) {
                 null -> true
-                CARD -> parts.size == 2
+                CARD -> parts.size == 2 || MemoryStickImages.validName(parts[2])
                 INBOX -> parts.size == 2 || (parts.size == 3 && validId(parts[2]))
-                else -> type.startsWith("$CARD:") && type.endsWith(".img", ignoreCase = true)
+                // The old card:<name> IDs must never follow a different card.
+                else -> false
             }
             if (!validId(parts.first()) || !validStorage || parts.size > MAX_COMPONENTS ||
                 parts.any { !validComponent(it) }) {
@@ -466,7 +466,7 @@ internal class StorageDocument private constructor(val parts: List<String>) {
 
 private fun storageChangeUri(context: Context, directory: StorageDocument) =
     DocumentsContract.buildChildDocumentsUri("${context.packageName}.storage",
-        (if (directory.isCard) directory.ancestor(2) else directory).id)
+        (if (directory.isCard) directory.ancestor(3) else directory).id)
 
 internal fun notifyPhoneStorageChanged(context: Context, phoneId: String? = null) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -475,21 +475,13 @@ internal fun notifyPhoneStorageChanged(context: Context, phoneId: String? = null
     context.contentResolver.notifyChange(storageChangeUri(context, directory), null)
 }
 
-internal fun notifyMemoryStickSelectionChanged(context: Context, phoneId: String, previous: String?) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
-    val phone = StorageDocument.parse(StorageDocument.ROOT).child(phoneId)
-    context.contentResolver.notifyChange(storageChangeUri(context, phone), null)
-    context.contentResolver.notifyChange(storageChangeUri(context, phone.child(StorageDocument.cardComponent(previous))), null)
-}
-
 internal fun notifyMemoryStickChanged(context: Context, name: String) {
-    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || !MemoryStickImages.validName(name)) return
     val root = StorageDocument.parse(StorageDocument.ROOT)
-    val preferences = AppPreferences(context)
-    FirmwareLibrary.get(context).entries().filter { it.device == "k750i" && preferences.phoneCard(it.id) == name }.forEach {
-        val card = root.child(it.id).child(StorageDocument.cardComponent(name))
-        context.contentResolver.notifyChange(storageChangeUri(context, card.parent()), null)
-        context.contentResolver.notifyChange(storageChangeUri(context, card), null)
+    FirmwareLibrary.get(context).entries().filter { it.device == "k750i" }.forEach { phone ->
+        val list = root.child(phone.id).child(StorageDocument.CARD)
+        context.contentResolver.notifyChange(storageChangeUri(context, list), null)
+        context.contentResolver.notifyChange(storageChangeUri(context, list.child(name)), null)
     }
 }
 

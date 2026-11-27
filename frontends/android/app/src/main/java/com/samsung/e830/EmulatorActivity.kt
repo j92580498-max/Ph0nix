@@ -114,19 +114,30 @@ class EmulatorActivity : AppCompatActivity() {
     }
     private val importCardDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) fileExecutor.execute {
-            val image = File(filesDir, "cards/imported-${UUID.randomUUID()}.img")
+            val directory = MemoryStickImages.directory(filesDir)
+            val id = UUID.randomUUID()
+            val image = File(directory, "imported-$id.img")
+            val staged = File(directory, ".$id.tmp")
             val result = runCatching {
-                image.parentFile!!.mkdirs()
-                contentResolver.openInputStream(uri)!!.use { input -> image.outputStream().use { copyLimited(input, it, 1024L * 1024L * 1024L) } }
-                val response = JSONObject(NativeBridge.nativeCardRequest(JSONObject().put("image", image.absolutePath).put("operation", "info").toString()))
-                check(!response.has("error")) { response.optString("error") }
+                check(directory.isDirectory || directory.mkdirs()) { "Could not create the card images folder." }
+                try {
+                    val input = contentResolver.openInputStream(uri) ?: error("Could not open the card image.")
+                    input.use { staged.outputStream().use { output -> copyLimited(input, output, 1024L * 1024L * 1024L) } }
+                    val request = JSONObject().put("image", staged.absolutePath).put("operation", "info")
+                    val response = JSONObject(NativeBridge.nativeCardRequest(request.toString()))
+                    check(!response.has("error")) { response.optString("error") }
+                    check(staged.renameTo(image)) { "Could not save the card image." }
+                } finally {
+                    staged.delete()
+                }
             }
+            if (result.isSuccess) notifyMemoryStickChanged(this, image.name)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.onSuccess {
                     showCardFiles(image.absolutePath)
                 }
-                    .onFailure { image.delete(); Toast.makeText(this, "Card import failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                    .onFailure { Toast.makeText(this, "Card import failed: ${it.message}", Toast.LENGTH_LONG).show() }
             }
         }
     }
@@ -711,9 +722,10 @@ class EmulatorActivity : AppCompatActivity() {
     }
 
     private fun showCards() {
-        val cards = File(filesDir, "cards").listFiles()?.filter { it.isFile && it.extension.lowercase() == "img" }.orEmpty()
+        val cards = MemoryStickImages.list(MemoryStickImages.directory(filesDir))
         val labels = listOf("Create image…", "Import image…") + cards.map {
-            if (it.absolutePath == bootCard) "${it.name} (inserted)" else "${it.name} (${it.length() / 1048576} MiB)"
+            val label = MemoryStickImages.label(it)
+            if (it.absolutePath == bootCard) "$label (inserted)" else label
         }
         MaterialAlertDialogBuilder(this).setTitle("Removable card images")
             .setItems(labels.toTypedArray()) { _, index ->
@@ -735,11 +747,12 @@ class EmulatorActivity : AppCompatActivity() {
             .setNegativeButton("Cancel", null).setPositiveButton("Create") { _, _ ->
                 val label = name.text.toString().trim()
                 val mib = size.text.toString().toLongOrNull()
-                if (label.isEmpty() || label.contains('/') || label.contains('\\') || label == "." || label == ".." || mib == null || mib !in 16L..1024L) {
+                if (!StorageDocument.validComponent(label) || !MemoryStickImages.validName("$label.img") ||
+                    mib == null || mib !in 16L..1024L) {
                     Toast.makeText(this, "Choose an image name and a size from 16 to 1024 MiB.", Toast.LENGTH_LONG).show()
                     return@setPositiveButton
                 }
-                val image = File(filesDir, "cards/$label.img")
+                val image = File(MemoryStickImages.directory(filesDir), "$label.img")
                 requestCard(image.absolutePath, JSONObject().put("operation", "create").put("size_mib", mib)) {
                     showCardFiles(image.absolutePath)
                 }

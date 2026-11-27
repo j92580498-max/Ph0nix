@@ -88,17 +88,42 @@ class PhoneDocumentsTest {
     }
 
     @Test
-    fun documentsCannotCrossPhonesOrFollowAReplacementCard() {
+    fun documentsKeepEachCardUnderItsPhoneAndOutOfTheFatPath() {
         val provider = PhoneDocumentsProvider()
         val phone = "phones/b310d433-2f28-4efe-b6b7-195f175b8f8a"
         val other = "phones/4d97e4e1-b294-4a50-adc8-f6f484c3324b"
-        val card = "$phone/card:original.img"
-        assertTrue(provider.isChildDocument(phone, card))
-        assertTrue(provider.isChildDocument(card, "$card/Music/song.mp3"))
+        val list = "$phone/card"
+        val card = "$list/original.img"
+        val second = "$list/replacement.img"
+        val song = "$card/Music/song.mp3"
+        assertTrue(provider.isChildDocument(phone, list))
+        assertTrue(provider.isChildDocument(list, card))
+        assertTrue(provider.isChildDocument(list, second))
+        assertTrue(provider.isChildDocument(card, song))
+        assertEquals(listOf("Music", "song.mp3"), StorageDocument.parse(song).fatPath)
+        assertTrue(StorageDocument.parse(card).fatPath.isEmpty())
+        assertThrows(IOException::class.java) { StorageDocument.parse("$phone/card:original.img") }
         for (id in listOf("$card/../other.img/song.mp3", "$card/Music\\song.mp3",
-            "$other/card:original.img/song.mp3", "$phone/card:replacement.img/song.mp3", "$card/", card)) {
+            "$other/card/original.img/song.mp3", "$second/song.mp3", "$card/", card)) {
             assertTrue("Expected rejection: $id", !provider.isChildDocument(card, id))
         }
+    }
+
+    @Test
+    fun selectedCardDocumentResolvesOnlyItsOwnImage() {
+        val cards = temporary.newFolder("cards")
+        val first = cards.resolve("first.img").apply { writeText("first") }
+        val second = cards.resolve("second.IMG").apply { writeText("second") }
+        cards.resolve(".import.tmp").writeText("copy is unfinished")
+        cards.resolve("folder.img").mkdir()
+        assertEquals(listOf(first, second), MemoryStickImages.list(cards))
+
+        val chosen = StorageDocument.parse("phones/b310d433-2f28-4efe-b6b7-195f175b8f8a/card/second.IMG/Other/photo.jpg")
+        val name = requireNotNull(chosen.cardName)
+        assertEquals(second, MemoryStickImages.find(cards, name))
+        assertTrue(second.delete())
+        assertEquals(null, MemoryStickImages.find(cards, name))
+        assertEquals(first, MemoryStickImages.list(cards).single())
     }
 
     @Test

@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ph0nix</string>
-    <string name="phone_documents_choose_storage">Откройте Memory Stick или внутреннюю память, затем нажмите «Копировать».</string>
+    <string name="phone_documents_choose_storage">Для копирования на карту откройте Memory Stick и выберите карту. Для памяти телефона откройте «Внутренняя память».</string>
     <string name="card_documents_title">Memory Stick (карта памяти)</string>
     <string name="card_documents_in_use">Остановите K750i в ph0nix, дождитесь сохранения карты и снова откройте эту папку.</string>
-    <string name="card_documents_missing">Карта не выбрана. Запустите этот K750i с картой, остановите его и снова откройте папку телефона.</string>
+    <string name="card_documents_choose_card">Откройте нужную карту, затем нажмите «Копировать».</string>
+    <string name="card_documents_empty">Карт пока нет. Создайте или импортируйте карту в меню запуска K750i в ph0nix.</string>
+    <string name="card_documents_missing">Этот образ карты больше недоступен. Вернитесь назад и выберите другую карту.</string>
     <string name="card_documents_copy_summary">Файлы копируются прямо на карту. При следующем запуске выберите ту же карту.</string>
     <string name="phone_inbox_title">Внутренняя память (Other)</string>
     <string name="phone_inbox_summary">Копируйте отдельные файлы до 32 МиБ. Чтобы завершить импорт в память телефона (Other), оставьте этот K750i открытым в ph0nix.</string>
