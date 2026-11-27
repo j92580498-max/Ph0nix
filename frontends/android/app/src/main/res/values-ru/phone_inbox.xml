@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="phone_inbox_title">Внутренняя память</string>
-    <string name="phone_inbox_summary">Файлы попадут в Other после запуска K750i.</string>
-    <string name="phone_inbox_saved">Сохранено в Other: %1$s</string>
-    <string name="phone_inbox_failed">Не удалось импортировать %1$s. Копия осталась в «Файлах» Android. %2$s</string>
-    <string name="phone_inbox_retry">Повторить импорт из Android</string>
-    <string name="card_documents_missing">Выберите Memory Stick при запуске этого K750i в ph0nix.</string>
-</resources>
