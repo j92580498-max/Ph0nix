@@ -83,7 +83,8 @@ jobs:
         run: |
           work="$(mktemp -d "$RUNNER_TEMP/ph0nix-inbox.XXXXXXXX")"
           trap 'rm -rf -- "$work"' EXIT
-          if ! "$FEATUREPHONE_PYTHON" -m db2010.development.build --jobs 2; then
+          # Recreate Meson's Python environment after the runner cleans its checkout.
+          if ! "$FEATUREPHONE_PYTHON" -m db2010.development.build --configure --jobs 2; then
             find build/provenance/qemu -type f -name build.log -exec tail -n 60 {} \; || true
             exit 1
           fi
