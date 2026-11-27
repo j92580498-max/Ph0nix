@@ -23,6 +23,10 @@ fn run(session: &mut Session, request: FileRequest) -> Result<FileJob> {
     }
     let id = session.files.request(request)?;
     loop {
+        if session.files.pending_commit() {
+            session.save_with_resume(false)?;
+            session.resume_after_save()?;
+        }
         let snapshot = session.files.snapshot();
         if let Some(job) = snapshot.job {
             if job.id == id && !snapshot.busy {
@@ -249,16 +253,53 @@ fn main() -> Result<()> {
         &source,
         b"ph0nix file transfer remains usable after save and resume\n",
     )?;
+    let inbox = std::env::var_os("PH0NIX_TEST_ANDROID_INBOX").is_some();
+    let staged = workspace.join("ph0nix-resume-test.txt");
+    if inbox {
+        ensure!(fresh.is_some(), "The Android inbox test requires a fresh phone");
+        // A move from Android Files owns a staged copy in the inbox.
+        fs::copy(&source, &staged)?;
+    }
     let directory;
     let path;
     {
         println!("{}", serde_json::json!({"phase":"initial_boot","state":state}));
         let mut session = Session::open(&engine, &state, checkpoint.as_deref())?;
+        let mut imported = false;
+        if inbox {
+            wait_for_serial(&mut session, &workspace, "inbox-early", 0)?;
+            capture_panel(&mut session, "inbox-early")?;
+            match run(&mut session, FileRequest::ImportInternal {
+                name: "ph0nix-resume-test.txt".into(), host: staged.clone(),
+            }) {
+                Ok(_) => imported = true,
+                Err(error) => {
+                    eprintln!("Early Android inbox: {error:#}");
+                    if error.to_string().contains("Restart K750i") {
+                        report_boot_failure(&mut session, &workspace, "inbox-early");
+                        drop(session);
+                        session = Session::open(&engine, &state, None)?;
+                    }
+                }
+            }
+        }
         if checkpoint.is_none() {
             wait_for_serial(&mut session, &workspace, "initial-boot", 240)?;
             finish_first_setup(&mut session)?;
         }
         if fresh.is_some() { verify_pause(&mut session)?; }
+        if inbox && !imported {
+            if let Err(error) = run(&mut session, FileRequest::ImportInternal {
+                name: "ph0nix-resume-test.txt".into(), host: staged.clone(),
+            }) {
+                report_boot_failure(&mut session, &workspace, "inbox-after-setup");
+                return Err(error);
+            }
+        }
+        if inbox {
+            ensure!(!staged.exists(), "Android inbox source was not released after a successful save");
+            println!("{{\"android_inbox_import\":\"passed\",\"imported_before_setup\":{imported}}}");
+        }
         directory = match internal_other(&mut session) {
             Ok(directory) => directory,
             Err(error) => {
@@ -267,15 +308,17 @@ fn main() -> Result<()> {
             }
         };
         path = [directory.clone(), vec!["ph0nix-resume-test.txt".into()]].concat();
-        run(
-            &mut session,
-            FileRequest::Import {
-                path: path.clone(),
-                host: source.clone(),
-                replace: false,
-                move_source: false,
-            },
-        )?;
+        if !inbox {
+            run(
+                &mut session,
+                FileRequest::Import {
+                    path: path.clone(),
+                    host: source.clone(),
+                    replace: false,
+                    move_source: false,
+                },
+            )?;
+        }
         println!(
             "{}",
             serde_json::json!({"phase":"before_save","files":session.files.snapshot()})

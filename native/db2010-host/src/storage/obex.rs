@@ -209,14 +209,18 @@ impl<T: Read + Write> ObexClient<T> {
     }
     fn read_at_reply(&mut self, deadline: Instant, handover: bool) -> Result<AtReply> {
         let mut line = Vec::new();
-        for _ in 0..4096 {
+        let mut saw_ok = false;
+        for received in 0..4096 {
             let mut byte = [0];
-            self.exact(&mut byte, deadline)?;
+            self.exact(&mut byte, deadline).with_context(|| {
+                format!("AT reply incomplete ({received} bytes, OK received: {saw_ok})")
+            })?;
             line.push(byte[0]);
             if line.ends_with(b"\r\n") {
                 let text = line.trim_ascii();
                 match text {
                     b"OK" if !handover => return Ok(AtReply::Ok),
+                    b"OK" => saw_ok = true,
                     b"CONNECT" => return Ok(AtReply::Connect),
                     b"ERROR" | b"NO CARRIER" | b"BUSY" => return Ok(AtReply::Refused),
                     _ if text.starts_with(b"+CME ERROR:") => return Ok(AtReply::Refused),
@@ -227,10 +231,12 @@ impl<T: Read + Write> ObexClient<T> {
         }
         bail!("Invalid AT response")
     }
-    fn handover(&mut self, command: &[u8]) -> Result<bool> {
+    fn handover(&mut self, command: &str) -> Result<bool> {
         let deadline = Instant::now() + self.timeout;
-        self.write(command, deadline)?;
-        Ok(self.read_at_reply(deadline, true)? == AtReply::Connect)
+        self.write(command.as_bytes(), deadline)
+            .and_then(|()| self.read_at_reply(deadline, true))
+            .with_context(|| format!("{} handover", command.trim_end()))
+            .map(|reply| reply == AtReply::Connect)
     }
     /// A ready UART does not imply that the handset's AT interpreter is running.
     pub fn connect_when_ready(&mut self) -> Result<()> {
@@ -267,11 +273,11 @@ impl<T: Read + Write> ObexClient<T> {
             return Ok(());
         }
         if !binary {
-            let handover = self.handover(b"AT+CPROT=0\r").and_then(|accepted| {
+            let handover = self.handover("AT+CPROT=0\r").and_then(|accepted| {
                 if accepted {
                     Ok(true)
                 } else {
-                    self.handover(b"AT*EOBEX\r")
+                    self.handover("AT*EOBEX\r")
                 }
             });
             match handover {
