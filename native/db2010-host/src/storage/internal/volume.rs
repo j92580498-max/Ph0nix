@@ -48,7 +48,7 @@ impl Volume {
                     break 'nor;
                 }
                 match tag >> 24 {
-                    0xaa => record(&mut slots, tag, Slot::Nor(span_no * NOR_SPAN + i * NOR_SLOT))?,
+                    0xaa => { record(&mut slots, tag, Slot::Nor(span_no * NOR_SPAN + i * NOR_SLOT))?; }
                     0 | 0xbf | 0xff => (),
                     _ => anyhow::bail!("Unsupported K750i NOR slot tag"),
                 }
