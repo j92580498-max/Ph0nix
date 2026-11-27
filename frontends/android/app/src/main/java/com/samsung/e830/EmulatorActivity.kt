@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.view.KeyEvent
@@ -80,6 +81,9 @@ class EmulatorActivity : AppCompatActivity() {
     private var activeFile: PendingFile? = null
     private var activeFileId = 0L
     private var lastFileErrorId = 0L
+    private var nextInboxCheck = 0L
+    private var checkingInbox = false
+    private val failedInboxFiles = mutableSetOf<String>()
     private var importDestination = emptyList<String>()
     private var moveImportedDocument = false
     private var importCardImage: String? = null
@@ -120,7 +124,6 @@ class EmulatorActivity : AppCompatActivity() {
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
                 result.onSuccess {
-                    notifyCardImagesChanged(this)
                     showCardFiles(image.absolutePath)
                 }
                     .onFailure { image.delete(); Toast.makeText(this, "Card import failed: ${it.message}", Toast.LENGTH_LONG).show() }
@@ -160,6 +163,10 @@ class EmulatorActivity : AppCompatActivity() {
         } else if (temporary) staged?.delete()
     }
     private val selection by lazy { intent.getStringExtra(EXTRA_SELECTION).orEmpty() }
+    private val phoneId by lazy { intent.getStringExtra(EXTRA_PHONE_ID)?.takeIf { StorageDocument.validId(it) } }
+    private val inboxDirectory by lazy {
+        intent.getStringExtra(EXTRA_PHONE_DIRECTORY)?.let { PhoneInbox.directory(File(it)) }
+    }
     private val bootCard by lazy { intent.getStringExtra(EXTRA_CARD_IMAGE).orEmpty() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -215,12 +222,18 @@ class EmulatorActivity : AppCompatActivity() {
         toolbar.menu.add(0, MENU_BLUETOOTH, 1, "Bluetooth files")
         toolbar.menu.add(0, MENU_CARDS, 2, "Card images")
         toolbar.menu.add(0, MENU_DEVELOPER, 3, "Developer")
+        if (device == "k750i" && phoneId != null) toolbar.menu.add(0, MENU_ANDROID_INBOX, 4, R.string.phone_inbox_retry)
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 MENU_FILES -> showFileBrowser()
                 MENU_BLUETOOTH -> showBluetooth()
                 MENU_CARDS -> showCards()
                 MENU_DEVELOPER -> openDiagnostics()
+                MENU_ANDROID_INBOX -> {
+                    failedInboxFiles.clear()
+                    nextInboxCheck = 0L
+                    checkAndroidInbox()
+                }
                 else -> return@setOnMenuItemClickListener false
             }
             true
@@ -361,7 +374,7 @@ class EmulatorActivity : AppCompatActivity() {
                 return@execute
             }
             sessionHandle.set(handle)
-            if (bootCard.isNotBlank()) notifyCardImagesChanged(this, File(bootCard).name)
+            if (bootCard.isNotBlank()) notifyMemoryStickChanged(this, File(bootCard).name)
             // A stop requested during startup is queued behind this task.
             if (generation.get() != token) return@execute
             diagnosticsDueNs = 0L
@@ -450,6 +463,7 @@ class EmulatorActivity : AppCompatActivity() {
         lcd.setRunning(false)
         lcd.onPresentationFrame = null
         waiting.visibility = View.GONE
+        val interruptedInbox = activeFile?.inbox
         activeFile?.let {
             filePanel?.message("Transfer interrupted while the phone was stopped. Retry after it resumes.")
             activeFile = null; activeFileId = 0L
@@ -459,7 +473,11 @@ class EmulatorActivity : AppCompatActivity() {
         nativeExecutor.execute {
             val handle = sessionHandle.getAndSet(0)
             val (error, report) = if (handle != 0L) stopAndDestroy(handle) else Pair(null, null)
-            if (handle != 0L && bootCard.isNotBlank()) notifyCardImagesChanged(this, File(bootCard).name)
+            if (handle != 0L && bootCard.isNotBlank()) notifyMemoryStickChanged(this, File(bootCard).name)
+            interruptedInbox?.let {
+                PhoneInbox.release(it)
+                notifyPhoneStorageChanged(this, phoneId)
+            }
             runOnUiThread {
                 stopPending = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -536,8 +554,50 @@ class EmulatorActivity : AppCompatActivity() {
         return true
     }
 
+    private fun checkAndroidInbox() {
+        val directory = inboxDirectory ?: return
+        if (phoneId == null || sessionHandle.get() == 0L || !foreground || sessionStopped ||
+            checkingInbox || activeFile != null ||
+            pendingFiles.isNotEmpty() || !latestFiles.optBoolean("attached") || latestFiles.optBoolean("busy") ||
+            !(latestFiles.optBoolean("serial_ready") || latestFiles.optBoolean("connected"))) return
+        val now = SystemClock.elapsedRealtime()
+        if (now < nextInboxCheck) return
+        nextInboxCheck = now + 2000
+        checkingInbox = true
+        val skip = failedInboxFiles.toSet()
+        fileExecutor.execute {
+            val item = PhoneInbox.claim(directory, skip)
+            runOnUiThread {
+                checkingInbox = false
+                if (item == null) return@runOnUiThread
+                if (!foreground || sessionStopped || sessionHandle.get() == 0L || isFinishing || isDestroyed ||
+                    activeFile != null || pendingFiles.isNotEmpty() || latestFiles.optBoolean("busy") || !latestFiles.optBoolean("attached")) {
+                    PhoneInbox.release(item)
+                    return@runOnUiThread
+                }
+                val request = JSONObject().put("operation", "import")
+                    .put("path", JSONArray(listOf("Phone memory", "Other", item.name)))
+                    .put("host", item.ready.absolutePath).put("replace", false).put("move_source", true)
+                pendingFiles.addLast(PendingFile(request, null, item))
+                drainFiles()
+            }
+        }
+    }
+
+    private fun inboxFinished(item: PhoneInbox.Item, error: String?) {
+        if (error != null) failedInboxFiles.add(item.id)
+        val message = if (error == null) getString(R.string.phone_inbox_saved, item.name)
+            else getString(R.string.phone_inbox_failed, item.name, error)
+        filePanel?.message(message)
+        if (foreground) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+        fileExecutor.execute {
+            PhoneInbox.release(item)
+            notifyPhoneStorageChanged(this, phoneId)
+        }
+    }
+
     private fun drainFiles() {
-        if (!foreground || activeFile != null || pendingFiles.isEmpty() ||
+        if (!foreground || sessionStopped || activeFile != null || pendingFiles.isEmpty() ||
             !latestFiles.optBoolean("attached") || latestFiles.optBoolean("busy")) return
         val handle = sessionHandle.get(); val token = generation.get()
         if (handle == 0L) return
@@ -548,13 +608,18 @@ class EmulatorActivity : AppCompatActivity() {
                 runOnUiThread { if (activeFile === action) { activeFile = null; pendingFiles.addFirst(action) } }
                 return@execute
             }
-            val result = runCatching { JSONObject(NativeBridge.nativeFileRequest(handle, action.request.toString())) }
+            val result = runCatching {
+                val response = JSONObject(NativeBridge.nativeFileRequest(handle, action.request.toString()))
+                check(!response.has("error")) { response.optString("error") }
+                response.getLong("id")
+            }
             runOnUiThread {
                 if (activeFile !== action) return@runOnUiThread
-                result.onSuccess { response ->
-                    if (response.has("error")) { filePanel?.message(response.optString("error")); activeFile = null }
-                    else activeFileId = response.getLong("id")
-                }.onFailure { filePanel?.message(it.message.orEmpty()); activeFile = null }
+                result.onSuccess { activeFileId = it }.onFailure { error ->
+                    activeFile = null
+                    val message = error.message.orEmpty()
+                    if (action.inbox != null) inboxFinished(action.inbox, message) else filePanel?.message(message)
+                }
             }
         }
     }
@@ -566,7 +631,11 @@ class EmulatorActivity : AppCompatActivity() {
         if (job != null && activeFileId != 0L && job.optLong("id") == activeFileId && !snapshot.optBoolean("busy")) {
             val action = activeFile
             activeFile = null; activeFileId = 0L
-            if (job.optString("phase") == "complete" && (job.isNull("error") || !job.has("error"))) {
+            val succeeded = job.optString("phase") == "complete" && job.isNull("error")
+            action?.inbox?.let { item ->
+                inboxFinished(item, if (succeeded) null else job.optString("error").takeUnless { job.isNull("error") }.orEmpty())
+            }
+            if (succeeded) {
                 action?.completed?.invoke(job)
                 if (filePanel?.isShowing == true && action?.request?.optString("operation") in
                     setOf("import", "copy", "delete", "delete_verified", "make_directory")) {
@@ -584,6 +653,7 @@ class EmulatorActivity : AppCompatActivity() {
             }
         }
         drainFiles()
+        checkAndroidInbox()
     }
 
     private fun importPhoneDocument(uri: Uri, destination: List<String>, move: Boolean, card: String? = null) {
@@ -671,7 +741,6 @@ class EmulatorActivity : AppCompatActivity() {
                 }
                 val image = File(filesDir, "cards/$label.img")
                 requestCard(image.absolutePath, JSONObject().put("operation", "create").put("size_mib", mib)) {
-                    notifyCardImagesChanged(this)
                     showCardFiles(image.absolutePath)
                 }
             }.show()
@@ -711,6 +780,10 @@ class EmulatorActivity : AppCompatActivity() {
         cardPanel?.message("Working…")
         fileExecutor.execute {
             val result = runCatching { JSONObject(NativeBridge.nativeCardRequest(request.put("image", image).toString())) }
+            if (result.getOrNull()?.has("error") == false &&
+                request.optString("operation") in setOf("create", "import", "delete", "rename", "make_directory")) {
+                notifyMemoryStickChanged(this, File(image).name)
+            }
             runOnUiThread {
                 cardBusy = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -816,7 +889,11 @@ class EmulatorActivity : AppCompatActivity() {
         else { afterBluetoothPermission = action; bluetoothPermission.launch(permissions.toTypedArray()) }
     }
 
-    private data class PendingFile(val request: JSONObject, val completed: ((JSONObject) -> Unit)?)
+    private data class PendingFile(
+        val request: JSONObject,
+        val completed: ((JSONObject) -> Unit)?,
+        val inbox: PhoneInbox.Item? = null,
+    )
 
     private fun stopAndDestroy(handle: Long): Pair<String?, JSONObject?> {
         val error = try {
@@ -930,6 +1007,8 @@ class EmulatorActivity : AppCompatActivity() {
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
     private data class Binding(val label: String, val mask: Int)
     companion object {
+        const val EXTRA_PHONE_ID = "com.samsung.e830.PHONE_ID"
+        const val EXTRA_PHONE_DIRECTORY = "com.samsung.e830.PHONE_DIRECTORY"
         const val EXTRA_SELECTION = "com.samsung.e830.SELECTION"
         const val EXTRA_MEMORY_WORKSPACE = "com.samsung.e830.MEMORY_WORKSPACE"
         const val EXTRA_CARD_IMAGE = "com.samsung.e830.CARD_IMAGE"
@@ -937,5 +1016,6 @@ class EmulatorActivity : AppCompatActivity() {
         private const val MENU_BLUETOOTH = 2
         private const val MENU_CARDS = 3
         private const val MENU_DEVELOPER = 4
+        private const val MENU_ANDROID_INBOX = 5
     }
 }

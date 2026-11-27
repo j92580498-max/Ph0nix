@@ -100,7 +100,7 @@ class MainActivity : AppCompatActivity() {
         WindowInsetsControllerCompat(window, root).isAppearanceLightStatusBars = false
         WindowInsetsControllerCompat(window, root).isAppearanceLightNavigationBars = false
 
-        library = FirmwareLibrary(this)
+        library = FirmwareLibrary.get(this)
         recycler = requireNotNull(findViewById<RecyclerView>(R.id.recycler))
         emptyState = requireNotNull(findViewById<View>(R.id.empty_state))
         status = requireNotNull(findViewById<TextView>(R.id.status))
@@ -318,6 +318,7 @@ class MainActivity : AppCompatActivity() {
             setBusy(false)
             result.fold(
                 onSuccess = { entry ->
+                    if (entry.device == "k750i") notifyPhoneStorageChanged(this)
                     status.text = getString(R.string.import_success, entry.name)
                     refreshLibrary()
                 },
@@ -461,7 +462,7 @@ class MainActivity : AppCompatActivity() {
         }
         val cards = File(filesDir, "cards").listFiles()
             ?.filter { it.isFile && it.extension.equals("img", ignoreCase = true) }
-            ?.sortedBy { it.name }.orEmpty()
+            ?.sortedWith(compareBy<File> { it.name != preferences.phoneCard(entry.id) }.thenBy { it.name }).orEmpty()
         val choices = listOf("Start without a card", "Create a card and start…", "Import an image and start…") +
             cards.map { "${it.name} (${it.length() / 1048576} MiB)" }
         MaterialAlertDialogBuilder(this).setTitle("K750i Memory Stick")
@@ -527,18 +528,24 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             setBusy(false)
-            result.onSuccess { (entry, image) ->
-                notifyCardImagesChanged(this)
-                launchFirmware(entry, image)
-            }
+            result.onSuccess { (entry, image) -> launchFirmware(entry, image) }
                 .onFailure { showMessage(it.message ?: "Could not prepare the Memory Stick.") }
         }
     }
 
     private fun launchFirmware(entry: FirmwareEntry, card: File?) {
+        if (entry.device == "k750i" && card != null) {
+            val previous = preferences.phoneCard(entry.id)
+            if (previous != card.name) {
+                preferences.rememberPhoneCard(entry.id, card.name)
+                notifyMemoryStickSelectionChanged(this, entry.id, previous)
+            }
+        }
         startActivity(
             Intent(this, EmulatorActivity::class.java)
                 .putExtra(EmulatorActivity.EXTRA_SELECTION, entry.selectionJson())
+                .putExtra(EmulatorActivity.EXTRA_PHONE_ID, entry.id)
+                .putExtra(EmulatorActivity.EXTRA_PHONE_DIRECTORY, entry.directory.absolutePath)
                 .putExtra(EmulatorActivity.EXTRA_MEMORY_WORKSPACE, entry.memoryWorkspace?.absolutePath)
                 .putExtra(EmulatorActivity.EXTRA_CARD_IMAGE, card?.absolutePath),
         )
@@ -579,6 +586,7 @@ class MainActivity : AppCompatActivity() {
             setBusy(false)
             result.onSuccess {
                 refreshLibrary()
+                notifyPhoneStorageChanged(this)
                 showMessage(getString(R.string.phone_renamed, name))
             }.onFailure { error ->
                 showMessage(error.message ?: getString(R.string.rename_phone_failed))
@@ -604,6 +612,10 @@ class MainActivity : AppCompatActivity() {
             setBusy(false)
             result.fold(
                 onSuccess = {
+                    if (entry.device == "k750i") {
+                        preferences.rememberPhoneCard(entry.id, null)
+                        notifyPhoneStorageChanged(this)
+                    }
                     status.setText(R.string.source_files_untouched)
                     refreshLibrary()
                 },

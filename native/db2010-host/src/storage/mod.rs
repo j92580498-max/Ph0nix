@@ -150,6 +150,7 @@ pub struct FileJob {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FileSnapshot {
     pub attached: bool,
+    pub serial_ready: bool,
     pub connected: bool,
     pub busy: bool,
     pub path: Vec<String>,
@@ -199,6 +200,9 @@ impl PhoneFiles {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+    pub fn observe_serial(&self, cable_present: bool, input_ready: bool) {
+        self.update(|state| state.serial_ready = cable_present && (state.serial_ready || input_ready));
     }
     pub fn pending_commit(&self) -> bool {
         self.inner

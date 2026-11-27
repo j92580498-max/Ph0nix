@@ -215,6 +215,10 @@ impl Worker {
                             }
                             if Instant::now() >= status_due {
                                 let progress = session.progress()?;
+                                worker_files.observe_serial(
+                                    progress["serial_cable_present"] == true,
+                                    progress["serial_input_ready"] == true,
+                                );
                                 let status = format!("Running Sony Ericsson K750i · {:.1} s",
                                     progress["virtual_ns"].as_u64().unwrap_or(0) as f64 / 1e9);
                                 if sender.send(WorkerEvent::Status(status)).is_err() { break; }

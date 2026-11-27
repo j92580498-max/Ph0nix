@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ph0nix</string>
-    <string name="card_documents_title">ph0nix Memory Stick</string>
-    <string name="card_documents_summary">K750i card images</string>
+    <string name="card_documents_title">Memory Stick</string>
     <string name="card_documents_in_use">Stop the K750i in ph0nix and wait for the Memory Stick to finish saving.</string>
+    <string name="card_documents_missing">Select a Memory Stick when starting this K750i in ph0nix.</string>
+    <string name="phone_inbox_title">Internal storage</string>
+    <string name="phone_inbox_summary">Queued files go to Other when this K750i is running.</string>
+    <string name="phone_inbox_saved">Saved to Phone memory/Other: %1$s</string>
+    <string name="phone_inbox_failed">Could not import %1$s. The copy is still in Android Files. %2$s</string>
+    <string name="phone_inbox_retry">Retry files from Android</string>
     <string name="library_title">ph0nix</string>
     <string name="library_subtitle">Firmware library</string>
     <string name="empty_title">No firmware imported</string>

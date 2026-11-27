@@ -12,9 +12,9 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.SamsungE830">
         <provider
-            android:name=".CardDocumentsProvider"
-            android:authorities="${applicationId}.cards"
-            android:enabled="@bool/card_documents_enabled"
+            android:name=".PhoneDocumentsProvider"
+            android:authorities="${applicationId}.storage"
+            android:enabled="@bool/storage_documents_enabled"
             android:exported="true"
             android:grantUriPermissions="true"
             android:permission="android.permission.MANAGE_DOCUMENTS">

@@ -1,4 +1,4 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <bool name="card_documents_enabled">true</bool>
+    <bool name="storage_documents_enabled">true</bool>
 </resources>

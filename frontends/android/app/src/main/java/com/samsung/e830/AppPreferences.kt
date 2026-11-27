@@ -25,4 +25,9 @@ internal class AppPreferences(context: Context) {
     var sortByDevice: Boolean
         get() = values.getBoolean("sort_by_device", false)
         set(value) { values.edit().putBoolean("sort_by_device", value).apply() }
+    fun phoneCard(phoneId: String): String? = values.getString("card_$phoneId", null)
+
+    fun rememberPhoneCard(phoneId: String, imageName: String?) {
+        values.edit().putString("card_$phoneId", imageName).apply()
+    }
 }

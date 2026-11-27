@@ -12,7 +12,7 @@ import java.io.IOException
 import java.util.Locale
 import java.util.UUID
 
-internal class FirmwareLibrary(context: Context) {
+internal class FirmwareLibrary private constructor(context: Context) {
     private val resolver: ContentResolver = context.applicationContext.contentResolver
     private val root = File(context.applicationContext.filesDir, "firmware-library")
     private val indexFile = File(root, "library.json")
@@ -294,6 +294,11 @@ internal class FirmwareLibrary(context: Context) {
     private fun FirmwareEntry.record() = Record(id, name, device, files.mapValues { it.value.name })
 
     companion object {
+        private var instance: FirmwareLibrary? = null
+
+        @Synchronized
+        fun get(context: Context): FirmwareLibrary = instance ?: FirmwareLibrary(context.applicationContext).also { instance = it }
+
         const val MAX_NAME_LENGTH = 80
         private const val MAX_FILE_BYTES = 128L * 1024L * 1024L
         private val ID_PATTERN = Regex("^[0-9a-fA-F-]{36}$")
