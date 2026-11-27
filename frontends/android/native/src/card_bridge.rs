@@ -45,6 +45,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCardRequest<'loc
                     let result = card.delete_verified(&value, bytes, &sha256);
                     path = value[..value.len().saturating_sub(1)].to_vec(); result
                 },
+                FileRequest::ImportInternal { .. } => return Err("Start K750i to import to its internal storage".into()),
                 FileRequest::Disconnect => Ok(()),
             };
             result.map_err(|e| format!("{e:#}"))?;

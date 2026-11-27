@@ -4,7 +4,7 @@ use anyhow::{ensure, Context, Result};
 use db2010_host::{
     prepare,
     qmp::{export_internal_memory, import_internal_memory, Session},
-    storage::{FileEntry, FileJob, FileRequest},
+    storage::{internal_other_path, FileEntry, FileJob, FileRequest},
     HostOptions, LcdFrame,
 };
 use std::{
@@ -163,25 +163,8 @@ fn list(session: &mut Session, path: Vec<String>) -> Result<Vec<FileEntry>> {
     Ok(entries)
 }
 
-fn find_folder<'a>(entries: &'a [FileEntry], names: &[&str]) -> Option<&'a str> {
-    entries.iter().find(|entry| {
-        entry.directory && names.iter().any(|name| entry.name.to_lowercase() == name.to_lowercase())
-    }).map(|entry| entry.name.as_str())
-}
-
 fn internal_other(session: &mut Session) -> Result<Vec<String>> {
-    let root = list(session, vec![])?;
-    let other_names = ["Other", "Прочее", "Другое"];
-    if let Some(memory) = find_folder(&root, &["Phone memory", "Память телефона"]) {
-        let entries = list(session, vec![memory.to_owned()])?;
-        let other = find_folder(&entries, &other_names).context("No Other directory in phone memory")?;
-        Ok(vec![memory.to_owned(), other.to_owned()])
-    } else {
-        // With no Memory Stick controller in this test, the PC Suite root can
-        // expose the internal user directories directly.
-        let other = find_folder(&root, &other_names).context("No internal Other directory in OBEX root")?;
-        Ok(vec![other.to_owned()])
-    }
+    internal_other_path(|path| list(session, path.to_vec()))
 }
 
 fn assert_no_checkpoint(workspace: &Path) -> Result<()> {

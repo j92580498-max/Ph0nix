@@ -586,9 +586,8 @@ class EmulatorActivity : AppCompatActivity() {
                     PhoneInbox.release(item)
                     return@runOnUiThread
                 }
-                val request = JSONObject().put("operation", "import")
-                    .put("path", JSONArray(listOf("Phone memory", "Other", item.name)))
-                    .put("host", item.ready.absolutePath).put("replace", false).put("move_source", true)
+                val request = JSONObject().put("operation", "import_internal")
+                    .put("name", item.name).put("host", item.ready.absolutePath)
                 pendingFiles.addLast(PendingFile(request, null, item))
                 drainFiles()
             }
@@ -649,7 +648,7 @@ class EmulatorActivity : AppCompatActivity() {
             if (succeeded) {
                 action?.completed?.invoke(job)
                 if (filePanel?.isShowing == true && action?.request?.optString("operation") in
-                    setOf("import", "copy", "delete", "delete_verified", "make_directory")) {
+                    setOf("import", "import_internal", "copy", "delete", "delete_verified", "make_directory")) {
                     enqueueFile(JSONObject().put("operation", "list").put("path", JSONArray(filePanel!!.currentPath())))
                 }
             }

@@ -390,6 +390,7 @@ fn card_request(image: &Path, request: FileRequest) -> anyhow::Result<(PathBuf, 
         FileRequest::MakeDirectory { path } => { card.make_directory(&path)?; path[..path.len()-1].to_vec() },
         FileRequest::Delete { path } => { card.delete(&path)?; path[..path.len()-1].to_vec() },
         FileRequest::DeleteVerified { path, bytes, sha256 } => { card.delete_verified(&path, bytes, &sha256)?; path[..path.len()-1].to_vec() },
+        FileRequest::ImportInternal { .. } => anyhow::bail!("Start K750i to import to its internal storage"),
         FileRequest::Disconnect => Vec::new(),
     };
     let entries = card.list(&path)?; let info = card.info()?;
