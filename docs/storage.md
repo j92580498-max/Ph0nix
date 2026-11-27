@@ -52,12 +52,12 @@ On desktop, open **Card images**, create or open a FAT16 `.img`, and select **Us
 
 On a running phone, open **Phone files → Memory Stick**, open the destination folder, and select **Import… → Copy file** to pick a file in Android's system file picker.
 
-On Android 8.0 or later, select files in the system Files app and choose **Copy to? ? ph0nix ? [phone name]**. Each K750i has two folders:
+On Android 8.0 or later, select a source file in the system Files app. Choose **Copy to… → ph0nix → [phone name]**, open one of the two storage folders, then tap **Copy**. The phone folder itself is only used to pick the destination. Start with a small file with a name that does not already exist at the destination. The limit is 32 MiB per file.
 
-- **Memory Stick** opens the last card image chosen when starting that phone. Stop the emulator and wait for the card to finish saving before editing it in Files. Start with the same image to see the changes in the phone.
-- **Internal storage** accepts individual files and shows copies waiting to transfer. Start or return to that K750i and complete any first boot dialogs. The emulator sends the files to **Phone memory ? Other** over its virtual cable and removes each queued copy after verifying the transfer and saving the phone memory. If the transfer fails, the copy stays in Files. Use **Retry files from Android** in the emulator menu after resolving the error. Browse installed files from **Phone files** in ph0nix.
+- **Memory Stick (memory card)** copies directly to the last card selected for that K750i. If no card is selected, start the phone with a card first. Stop the emulator and wait for it to finish saving before copying, then start with the same card to see the files.
+- **Internal storage (Other)** accepts individual files. After copying, open that K750i in ph0nix and complete any first boot dialogs. Keep the emulator on screen until the files are saved to **Phone memory → Other**. Files in the Android folder are waiting to transfer; the emulator removes each copy after verifying the transfer and saving the phone memory. If the transfer fails, the copy stays in Files. Use **Retry files from Android** in the emulator menu after resolving the error. Browse installed files from **Phone files** in ph0nix.
 
-The limit is 32 MiB per file. File managers that do not show document providers can still select a source through **Import?** inside ph0nix.
+If your file manager does not show ph0nix, use Android's system Files app or start from **Import…** in ph0nix's **Phone files** or **Card images** panel.
 
 Firmware compatibility is checked by the `K750i Memory Stick storage` workflow on CT100. It exercises the stock R1DB001 firmware, including file listing, writeback to the raw image, and reopening the file after a cold boot.
 

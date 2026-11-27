@@ -1,11 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ph0nix</string>
-    <string name="card_documents_title">Memory Stick</string>
-    <string name="card_documents_in_use">Остановите K750i в ph0nix и дождитесь сохранения карты Memory Stick.</string>
-    <string name="card_documents_missing">Выберите Memory Stick при запуске этого K750i в ph0nix.</string>
-    <string name="phone_inbox_title">Внутренняя память</string>
-    <string name="phone_inbox_summary">Файлы попадут в Other после запуска K750i.</string>
+    <string name="phone_documents_choose_storage">Откройте Memory Stick или внутреннюю память, затем нажмите «Копировать».</string>
+    <string name="card_documents_title">Memory Stick (карта памяти)</string>
+    <string name="card_documents_in_use">Остановите K750i в ph0nix, дождитесь сохранения карты и снова откройте эту папку.</string>
+    <string name="card_documents_missing">Карта не выбрана. Запустите этот K750i с картой, остановите его и снова откройте папку телефона.</string>
+    <string name="card_documents_copy_summary">Файлы копируются прямо на карту. При следующем запуске выберите ту же карту.</string>
+    <string name="phone_inbox_title">Внутренняя память (Other)</string>
+    <string name="phone_inbox_summary">Копируйте отдельные файлы до 32 МиБ. Чтобы завершить импорт в память телефона (Other), оставьте этот K750i открытым в ph0nix.</string>
+    <string name="phone_inbox_files_only">Во внутреннюю память можно копировать только файлы. Откройте исходную папку и выберите файлы внутри.</string>
     <string name="phone_inbox_saved">Сохранено в Other: %1$s</string>
     <string name="phone_inbox_failed">Не удалось импортировать %1$s. Копия осталась в «Файлах» Android. %2$s</string>
     <string name="phone_inbox_retry">Повторить импорт из Android</string>
