@@ -527,7 +527,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             setBusy(false)
-            result.onSuccess { (entry, image) -> launchFirmware(entry, image) }
+            result.onSuccess { (entry, image) ->
+                notifyCardImagesChanged(this)
+                launchFirmware(entry, image)
+            }
                 .onFailure { showMessage(it.message ?: "Could not prepare the Memory Stick.") }
         }
     }

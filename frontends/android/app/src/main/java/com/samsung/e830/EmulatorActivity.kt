@@ -119,7 +119,10 @@ class EmulatorActivity : AppCompatActivity() {
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                result.onSuccess { showCardFiles(image.absolutePath) }
+                result.onSuccess {
+                    notifyCardImagesChanged(this)
+                    showCardFiles(image.absolutePath)
+                }
                     .onFailure { image.delete(); Toast.makeText(this, "Card import failed: ${it.message}", Toast.LENGTH_LONG).show() }
             }
         }
@@ -358,6 +361,7 @@ class EmulatorActivity : AppCompatActivity() {
                 return@execute
             }
             sessionHandle.set(handle)
+            if (bootCard.isNotBlank()) notifyCardImagesChanged(this, File(bootCard).name)
             // A stop requested during startup is queued behind this task.
             if (generation.get() != token) return@execute
             diagnosticsDueNs = 0L
@@ -455,6 +459,7 @@ class EmulatorActivity : AppCompatActivity() {
         nativeExecutor.execute {
             val handle = sessionHandle.getAndSet(0)
             val (error, report) = if (handle != 0L) stopAndDestroy(handle) else Pair(null, null)
+            if (handle != 0L && bootCard.isNotBlank()) notifyCardImagesChanged(this, File(bootCard).name)
             runOnUiThread {
                 stopPending = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -665,7 +670,10 @@ class EmulatorActivity : AppCompatActivity() {
                     return@setPositiveButton
                 }
                 val image = File(filesDir, "cards/$label.img")
-                requestCard(image.absolutePath, JSONObject().put("operation", "create").put("size_mib", mib)) { showCardFiles(image.absolutePath) }
+                requestCard(image.absolutePath, JSONObject().put("operation", "create").put("size_mib", mib)) {
+                    notifyCardImagesChanged(this)
+                    showCardFiles(image.absolutePath)
+                }
             }.show()
     }
 

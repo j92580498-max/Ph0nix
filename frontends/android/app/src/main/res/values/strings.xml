@@ -1,6 +1,9 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <string name="app_name">ph0nix</string>
+    <string name="card_documents_title">ph0nix Memory Stick</string>
+    <string name="card_documents_summary">K750i card images</string>
+    <string name="card_documents_in_use">Stop the K750i in ph0nix and wait for the Memory Stick to finish saving.</string>
     <string name="library_title">ph0nix</string>
     <string name="library_subtitle">Firmware library</string>
     <string name="empty_title">No firmware imported</string>

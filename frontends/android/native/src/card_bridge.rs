@@ -10,6 +10,8 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCardRequest<'loc
 ) -> jstring {
     let result = (|| -> Result<Value, String> {
         let mut request: Value = serde_json::from_str(&read_string(&mut env, &request)?).map_err(|e| e.to_string())?;
+        let include_snapshot = request.as_object_mut().ok_or("Invalid card request")?
+            .remove("include_snapshot").and_then(|value| value.as_bool()).unwrap_or(true);
         let image = PathBuf::from(request["image"].as_str().ok_or("Choose a card image")?);
         let operation = request["operation"].as_str().unwrap_or("info").to_owned();
         let card = if operation == "create" {
@@ -46,6 +48,9 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCardRequest<'loc
                 FileRequest::Disconnect => Ok(()),
             };
             result.map_err(|e| format!("{e:#}"))?;
+        }
+        if !include_snapshot {
+            return Ok(json!({}));
         }
         let entries = card.list(&path).map_err(|e| format!("{e:#}"))?;
         let info = card.info().map_err(|e| format!("{e:#}"))?;

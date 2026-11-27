@@ -11,6 +11,17 @@
         android:label="@string/app_name"
         android:supportsRtl="true"
         android:theme="@style/Theme.SamsungE830">
+        <provider
+            android:name=".CardDocumentsProvider"
+            android:authorities="${applicationId}.cards"
+            android:enabled="@bool/card_documents_enabled"
+            android:exported="true"
+            android:grantUriPermissions="true"
+            android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter>
+                <action android:name="android.content.action.DOCUMENTS_PROVIDER" />
+            </intent-filter>
+        </provider>
         <activity
             android:name=".EmulatorActivity"
             android:exported="false"

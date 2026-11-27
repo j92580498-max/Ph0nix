@@ -50,7 +50,9 @@ It writes `ph0nix-transfer-test.txt`, exports it into the prepared-state directo
 
 On desktop, open **Card images**, create or open a FAT16 `.img`, and select **Use for the next K750i boot**. On Android, choose a card image when starting a K750i from the library, or select **Create a card and start…** and pick a size from 16 MiB to 1 GiB. The engine attaches the image before the CPU starts, so the firmware can detect it during boot. Stop the phone before changing the image or editing it from the host. To reuse a card after a cold boot, select the same `.img`. With a card inserted, a normal stop gives the firmware 30 seconds of emulated time to finish card writes, then saves internal storage without a VM checkpoint. Wait for the app to finish saving before reopening or editing the image.
 
-On a running phone, open **Phone files → Memory Stick**, open the destination folder, and select **Import… → Copy file** to pick a file in Android's system file picker. The Memory Stick image is kept separately from the phone's internal storage; it does not appear as a second Android drive.
+On a running phone, open **Phone files → Memory Stick**, open the destination folder, and select **Import… → Copy file** to pick a file in Android's system file picker.
+
+To copy directly from Android 8.0 or later, first stop K750i and wait for it to save the card. In the system Files app, choose **Copy to… → ph0nix Memory Stick**, open the saved image as a folder, then paste. Select that same image on the next K750i boot. Files can copy up to 32 MiB per file. Android file managers that do not show document providers can still select source files through the **Import…** menu.
 
 Firmware compatibility is checked by the `K750i Memory Stick storage` workflow on CT100. It exercises the stock R1DB001 firmware, including file listing, writeback to the raw image, and reopening the file after a cold boot.
 
