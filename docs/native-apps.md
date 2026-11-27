@@ -48,6 +48,11 @@ focus loss or backgrounding. Android storage access uses document selection
 and private copies. The Internet permission is used for loopback QMP; no web
 application is started.
 
+In Android, open **Settings → App language** to switch between **System default**,
+**English**, and **Русский**. This changes the app interface, not the emulated
+phone's firmware language. Android 13 and later also offer the same selection in
+Android's per-app language settings.
+
 Desktop Settings keeps a draft until **Save**. **Cancel** or switching tabs
 discards the draft and restores any unsaved fullscreen preview.
 

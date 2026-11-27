@@ -59,6 +59,7 @@ class MainActivity : AppCompatActivity() {
     private var busy = false
     private lateinit var preferences: AppPreferences
     private lateinit var tabs: TabLayout
+    private lateinit var languageButton: MaterialButton
     private var entries = emptyList<FirmwareEntry>()
     private var query = ""
 
@@ -133,7 +134,7 @@ class MainActivity : AppCompatActivity() {
         recycler.adapter = adapter
         applyLibraryView()
         tabs = findViewById(R.id.tabs)
-        listOf("Library", "Devices", "Settings").forEach { tabs.addTab(tabs.newTab().setText(it)) }
+        listOf(R.string.library, R.string.devices, R.string.settings).forEach { tabs.addTab(tabs.newTab().setText(it)) }
         tabs.addOnTabSelectedListener(object : TabLayout.OnTabSelectedListener {
             override fun onTabSelected(tab: TabLayout.Tab) { showTab(tab.position) }
             override fun onTabUnselected(tab: TabLayout.Tab) {}
@@ -148,7 +149,7 @@ class MainActivity : AppCompatActivity() {
                 .setTitle(R.string.choose_phone)
                 .setItems(profiles.map { it.name }.toTypedArray()) { _, index ->
                     importDevice = profiles[index].id
-                    status.text = profiles[index].selectionHint
+                    status.text = profiles[index].selectionHint(this)
                     importFirmware.launch(arrayOf("*/*"))
                 }.show()
         }
@@ -192,7 +193,7 @@ class MainActivity : AppCompatActivity() {
     override fun onCreateOptionsMenu(menu: Menu): Boolean {
         menuInflater.inflate(R.menu.main, menu)
         (menu.findItem(R.id.action_search).actionView as SearchView).apply {
-            queryHint = "Search firmware"
+            queryHint = getString(R.string.search_firmware)
             setOnQueryTextListener(object : SearchView.OnQueryTextListener {
                 override fun onQueryTextSubmit(text: String?): Boolean = true
                 override fun onQueryTextChange(text: String?): Boolean {
@@ -206,7 +207,7 @@ class MainActivity : AppCompatActivity() {
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
         val libraryVisible = tabs.selectedTabPosition == 0
         listOf(R.id.action_search, R.id.action_view, R.id.action_sort).forEach { menu.findItem(it).isVisible = libraryVisible }
-        menu.findItem(R.id.action_view).title = if (preferences.grid) "List view" else "Grid view"
+        menu.findItem(R.id.action_view).title = getString(if (preferences.grid) R.string.list_view else R.string.grid_view)
         return super.onPrepareOptionsMenu(menu)
     }
 
@@ -214,7 +215,9 @@ class MainActivity : AppCompatActivity() {
         when (item.itemId) {
             R.id.action_view -> { preferences.grid = !preferences.grid; applyLibraryView(); invalidateOptionsMenu() }
             R.id.action_sort -> com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-                .setTitle("Sort firmware").setSingleChoiceItems(arrayOf("Name", "Phone"), if (preferences.sortByDevice) 1 else 0) { dialog, index ->
+                .setTitle(R.string.sort_firmware).setSingleChoiceItems(
+                    arrayOf(getString(R.string.sort_name), getString(R.string.sort_phone)), if (preferences.sortByDevice) 1 else 0,
+                ) { dialog, index ->
                     preferences.sortByDevice = index == 1; showEntries(); dialog.dismiss()
                 }.show()
             R.id.action_settings -> tabs.getTabAt(2)?.select()
@@ -243,47 +246,63 @@ class MainActivity : AppCompatActivity() {
         adapter.submit(visible)
         recycler.visibility = if (visible.isEmpty()) View.GONE else View.VISIBLE
         emptyState.visibility = if (visible.isEmpty()) View.VISIBLE else View.GONE
-        findViewById<TextView>(R.id.empty_title).text = if (entries.isNotEmpty() && visible.isEmpty()) "No matching firmware" else getString(R.string.empty_title)
+        findViewById<TextView>(R.id.empty_title).setText(
+            if (entries.isNotEmpty() && visible.isEmpty()) R.string.search_empty else R.string.empty_title,
+        )
     }
 
     private fun buildDevices() {
         val content = findViewById<LinearLayout>(R.id.devices_content)
-        content.addView(infoText("Available phone profiles", true))
+        content.addView(infoText(getString(R.string.available_profiles), true))
         DeviceProfiles.all.sortedBy { if (it.id == "k750i") 0 else 1 }.forEach { profile ->
             content.addView(infoText(profile.name, true))
-            content.addView(infoText(profile.support))
+            content.addView(infoText(profile.support(this)))
             content.addView(MaterialButton(this).apply {
-                text = "Import for ${profile.name}"; isAllCaps = false
+                text = getString(R.string.import_for_phone, profile.name); isAllCaps = false
                 setOnClickListener {
                     if (!busy) {
                         importDevice = profile.id
                         tabs.getTabAt(0)?.select()
-                        status.text = profile.selectionHint
+                        status.text = profile.selectionHint(this@MainActivity)
                         importFirmware.launch(arrayOf("*/*"))
                     }
                 }
             })
         }
-        content.addView(infoText("Manufacturer roadmap", true))
+        content.addView(infoText(getString(R.string.manufacturer_roadmap), true))
         val catalog = JSONArray(NativeBridge.nativeCatalog())
         for (index in 0 until catalog.length()) {
             val item = catalog.getJSONObject(index)
-            content.addView(infoText("${item.getString("name")} · ${item.getString("status")}", true))
-            content.addView(infoText(item.getString("detail")))
+            val name = item.getString("name")
+            val status = item.getString("status")
+            val statusLabel = when (status) {
+                "Experimental" -> getString(R.string.roadmap_experimental)
+                "Planned" -> getString(R.string.roadmap_planned)
+                else -> status
+            }
+            val detail = when {
+                name == "Sony Ericsson" && status == "Experimental" -> getString(R.string.roadmap_k750i)
+                status == "Planned" -> getString(R.string.roadmap_no_profile)
+                else -> item.getString("detail")
+            }
+            content.addView(infoText(getString(R.string.roadmap_manufacturer, name, statusLabel), true))
+            content.addView(infoText(detail))
         }
     }
 
     private fun buildSettings() {
         val content = findViewById<LinearLayout>(R.id.settings_content)
-        content.addView(infoText("Display", true))
-        content.addView(settingSwitch("Show FPS", preferences.showFps) { preferences.showFps = it })
-        content.addView(settingSwitch("Sound", preferences.sound) { preferences.sound = it })
-        content.addView(settingSwitch("Open phone in fullscreen", preferences.fullscreen) { preferences.fullscreen = it })
-        content.addView(settingSwitch("Keep screen awake while running", preferences.keepAwake) { preferences.keepAwake = it })
-        content.addView(infoText("Phone state", true))
-        content.addView(settingSwitch("Resume saved K750i session", preferences.resume) { preferences.resume = it })
-        content.addView(infoText("When enabled, K750i continues from its saved session. Disabling it cold boots with saved internal storage and settings. Internal storage is saved when the phone stops. First boot can take several minutes."))
-        content.addView(infoText("Presentation targets 60 FPS. Firmware LCD updates and emulation speed depend on the phone and your device."))
+        languageButton = languageSetting()
+        content.addView(languageButton)
+        content.addView(infoText(getString(R.string.settings_display), true))
+        content.addView(settingSwitch(getString(R.string.settings_show_fps), preferences.showFps) { preferences.showFps = it })
+        content.addView(settingSwitch(getString(R.string.settings_sound), preferences.sound) { preferences.sound = it })
+        content.addView(settingSwitch(getString(R.string.settings_fullscreen), preferences.fullscreen) { preferences.fullscreen = it })
+        content.addView(settingSwitch(getString(R.string.settings_awake), preferences.keepAwake) { preferences.keepAwake = it })
+        content.addView(infoText(getString(R.string.settings_phone_state), true))
+        content.addView(settingSwitch(getString(R.string.settings_resume), preferences.resume) { preferences.resume = it })
+        content.addView(infoText(getString(R.string.settings_resume_description)))
+        content.addView(infoText(getString(R.string.settings_fps_description)))
     }
 
     private fun settingSwitch(label: String, checked: Boolean, change: (Boolean) -> Unit) = SwitchMaterial(this).apply {
@@ -302,9 +321,9 @@ class MainActivity : AppCompatActivity() {
     private fun showAbout() {
         val notices = assets.open("licenses/NOTICE.txt").bufferedReader().use { it.readText() }
         com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-            .setTitle("Ph0nix ${packageManager.getPackageInfo(packageName, 0).versionName}")
-            .setMessage("Native firmware emulator for Android, Windows and Linux.\n\n$notices")
-            .setPositiveButton("Close", null).show()
+            .setTitle(getString(R.string.about_version, packageManager.getPackageInfo(packageName, 0).versionName))
+            .setMessage(getString(R.string.about_description, notices))
+            .setPositiveButton(R.string.close, null).show()
     }
 
     private fun refreshLibrary() {
@@ -318,7 +337,7 @@ class MainActivity : AppCompatActivity() {
                 onFailure = { error ->
                     recycler.visibility = View.GONE
                     emptyState.visibility = View.VISIBLE
-                    status.text = getString(R.string.library_error, error.message ?: "unknown error")
+                    status.text = getString(R.string.library_error, error.localizedMessage ?: getString(R.string.unknown_error))
                 },
             )
         }
@@ -341,7 +360,7 @@ class MainActivity : AppCompatActivity() {
                 },
                 onFailure = { error ->
                     status.text = getString(R.string.source_files_untouched)
-                    showMessage(getString(R.string.import_failed, error.message ?: "unknown error"))
+                    showMessage(getString(R.string.import_failed, error.localizedMessage ?: getString(R.string.unknown_error)))
                 },
             )
         }
@@ -360,7 +379,7 @@ class MainActivity : AppCompatActivity() {
             val result = withContext(Dispatchers.IO) {
                 runCatching {
                     val entry = library.entries().firstOrNull { it.id == entryId }
-                        ?: throw IllegalStateException("This firmware entry no longer exists.")
+                        ?: throw IllegalStateException(getString(R.string.firmware_missing))
                     library.attachOneNand(entry, uri)
                 }
             }
@@ -370,7 +389,7 @@ class MainActivity : AppCompatActivity() {
                     status.setText(R.string.nand_present)
                     refreshLibrary()
                 },
-                onFailure = { error -> showMessage(error.message ?: "Could not use this NAND image.") },
+                onFailure = { error -> showMessage(error.localizedMessage ?: getString(R.string.nand_use_failed)) },
             )
         }
     }
@@ -388,7 +407,7 @@ class MainActivity : AppCompatActivity() {
                     status.setText(R.string.nand_missing)
                     refreshLibrary()
                 },
-                onFailure = { error -> showMessage(error.message ?: "Could not remove the imported NAND copy.") },
+                onFailure = { error -> showMessage(error.localizedMessage ?: getString(R.string.nand_remove_failed)) },
             )
         }
     }
@@ -519,9 +538,9 @@ class MainActivity : AppCompatActivity() {
         }
         val lastCard = preferences.phoneCard(entry.id)
         val cards = MemoryStickImages.list(MemoryStickImages.directory(filesDir)).sortedBy { it.name != lastCard }
-        val choices = listOf("Start without a card", "Create a card and start…", "Import an image and start…") +
-            cards.map(MemoryStickImages::label)
-        MaterialAlertDialogBuilder(this).setTitle("K750i Memory Stick")
+        val choices = listOf(R.string.card_boot_without, R.string.card_boot_create, R.string.card_boot_import).map(::getString) +
+            cards.map { MemoryStickImages.label(this, it) }
+        MaterialAlertDialogBuilder(this).setTitle(R.string.card_boot_title)
             .setItems(choices.toTypedArray()) { _, index ->
                 when (index) {
                     0 -> launchFirmware(entry, null)
@@ -537,8 +556,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun chooseBootCardSize(entryId: String) {
         val sizes = listOf(16, 32, 64, 128, 256, 512, 1024)
-        val labels = sizes.map { if (it == 1024) "1 GiB" else "$it MiB" }.toTypedArray()
-        MaterialAlertDialogBuilder(this).setTitle("Choose Memory Stick size")
+        val labels = sizes.map { getString(if (it == 1024) R.string.size_gib else R.string.size_mib, if (it == 1024) 1 else it) }.toTypedArray()
+        MaterialAlertDialogBuilder(this).setTitle(R.string.card_choose_size)
             .setItems(labels) { _, index -> prepareBootCard(entryId, source = null, sizeMib = sizes[index]) }
             .setNegativeButton(R.string.cancel, null).show()
     }
@@ -552,13 +571,13 @@ class MainActivity : AppCompatActivity() {
                     val entry = library.entries().firstOrNull { it.id == entryId && it.device == "k750i" }
                         ?: error(getString(R.string.k750_memory_missing_entry))
                     val directory = MemoryStickImages.directory(filesDir)
-                    check(directory.isDirectory || directory.mkdirs()) { "Could not create the card images folder." }
+                    check(directory.isDirectory || directory.mkdirs()) { getString(R.string.card_folder_failed) }
                     val id = UUID.randomUUID()
                     val image = File(directory, "${if (source == null) "card" else "imported"}-$id.img")
                     val staged = File(directory, ".$id.tmp")
                     try {
                         if (source != null) {
-                            val input = contentResolver.openInputStream(source) ?: error("Could not open the card image.")
+                            val input = contentResolver.openInputStream(source) ?: error(getString(R.string.card_open_failed))
                             input.use {
                                 staged.outputStream().use { output ->
                                     val buffer = ByteArray(64 * 1024)
@@ -567,7 +586,7 @@ class MainActivity : AppCompatActivity() {
                                         val count = input.read(buffer)
                                         if (count == -1) break
                                         total += count
-                                        check(total <= 1024L * 1024 * 1024) { "The card image exceeds 1 GiB." }
+                                        check(total <= 1024L * 1024 * 1024) { getString(R.string.card_too_large) }
                                         output.write(buffer, 0, count)
                                     }
                                 }
@@ -578,7 +597,7 @@ class MainActivity : AppCompatActivity() {
                         if (source == null) request.put("size_mib", requireNotNull(sizeMib))
                         val response = JSONObject(NativeBridge.nativeCardRequest(request.toString()))
                         check(!response.has("error")) { response.optString("error") }
-                        check(staged.renameTo(image)) { "Could not save the card image." }
+                        check(staged.renameTo(image)) { getString(R.string.card_save_failed) }
                     } finally {
                         staged.delete()
                     }
@@ -588,7 +607,7 @@ class MainActivity : AppCompatActivity() {
             }
             setBusy(false)
             result.onSuccess { (entry, image) -> launchFirmware(entry, image) }
-                .onFailure { showMessage(it.message ?: "Could not prepare the Memory Stick.") }
+                .onFailure { showMessage(it.localizedMessage ?: getString(R.string.card_prepare_failed)) }
         }
     }
 
@@ -673,7 +692,7 @@ class MainActivity : AppCompatActivity() {
                     status.setText(R.string.source_files_untouched)
                     refreshLibrary()
                 },
-                onFailure = { error -> showMessage(error.message ?: "Could not remove this firmware set.") },
+                onFailure = { error -> showMessage(error.message ?: getString(R.string.firmware_remove_failed)) },
             )
         }
     }
@@ -681,6 +700,7 @@ class MainActivity : AppCompatActivity() {
     private fun setBusy(busy: Boolean) {
         this.busy = busy
         importButton.isEnabled = !busy
+        languageButton.isEnabled = !busy
         recycler.isEnabled = !busy
         recycler.alpha = if (busy) 0.55f else 1f
     }

@@ -43,7 +43,7 @@ internal class FirmwareAdapter(
         fun bind(entry: FirmwareEntry) {
             title.text = entry.name
             val profile = entry.profile
-            subtitle.text = "${profile.name}\n${profile.displayWidth} × ${profile.displayHeight} LCD"
+            subtitle.text = itemView.context.getString(R.string.firmware_card_subtitle, profile.name, profile.displayWidth, profile.displayHeight)
             itemView.setOnClickListener { onRun(entry) }
             requireNotNull(itemView.findViewById<View>(R.id.btn_run)).setOnClickListener { onRun(entry) }
             more.setOnClickListener { showMenu(it, entry) }

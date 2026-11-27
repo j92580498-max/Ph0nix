@@ -23,10 +23,10 @@ internal object MemoryStickImages {
     fun list(directory: File): List<File> = directory.list()
         ?.mapNotNull { find(directory, it) }?.sortedBy { it.name }.orEmpty()
 
-    fun label(image: File): String {
+    fun label(context: Context, image: File): String {
         val generated = generatedName.matchEntire(image.name)
         val name = if (generated == null) image.name else "${generated.groupValues[1]}-${generated.groupValues[2]}"
-        return "$name (${image.length() / 1048576} MiB)"
+        return context.getString(R.string.card_label, name, context.getString(R.string.size_mib, image.length() / 1048576))
     }
 
     fun capacitySummary(context: Context, info: JSONObject): String = context.getString(

@@ -20,6 +20,7 @@ import android.system.OsConstants
 import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.annotation.RequiresApi
+import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -33,6 +34,7 @@ import java.util.UUID
 @RequiresApi(26)
 class PhoneDocumentsProvider : DocumentsProvider() {
     private val app: Context get() = requireNotNull(context)
+    private val localized: Context get() = ContextCompat.getContextForLanguage(app)
     private val cards: File get() = MemoryStickImages.directory(app.filesDir)
     private val mutations = Any()
     private val writers = mutableMapOf<String, Any>()
@@ -46,7 +48,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         addRow(values(columnNames) { column ->
             when (column) {
                 Root.COLUMN_ROOT_ID, Root.COLUMN_DOCUMENT_ID -> StorageDocument.ROOT
-                Root.COLUMN_TITLE -> app.getString(R.string.app_name)
+                Root.COLUMN_TITLE -> localized.getString(R.string.app_name)
                 Root.COLUMN_ICON -> R.mipmap.ic_launcher
                 Root.COLUMN_FLAGS -> Root.FLAG_LOCAL_ONLY or Root.FLAG_SUPPORTS_CREATE or Root.FLAG_SUPPORTS_IS_CHILD
                 else -> null
@@ -101,8 +103,8 @@ class PhoneDocumentsProvider : DocumentsProvider() {
                     val response = request(parent, "list")
                     if (parent.isCardRoot) {
                         setExtras(Bundle().apply {
-                            val capacity = MemoryStickImages.capacitySummary(app, response.getJSONObject("info"))
-                            putString(DocumentsContract.EXTRA_INFO, "$capacity\n${app.getString(R.string.card_documents_copy_summary)}")
+                            val capacity = MemoryStickImages.capacitySummary(localized, response.getJSONObject("info"))
+                            putString(DocumentsContract.EXTRA_INFO, "$capacity\n${localized.getString(R.string.card_documents_copy_summary)}")
                         })
                     }
                     val entries = response.getJSONObject("snapshot").getJSONArray("entries")
@@ -113,7 +115,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
                 } catch (error: IOException) {
                     setExtras(Bundle().apply { putString(DocumentsContract.EXTRA_ERROR, error.message) })
                 }
-                else -> throw FileNotFoundException("Not a storage directory.")
+                else -> throw FileNotFoundException(localized.getString(R.string.storage_not_directory))
             }
         }
     }
@@ -129,7 +131,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
     override fun findDocumentPath(parentDocumentId: String?, childDocumentId: String): DocumentsContract.Path = documentIo {
         val parent = StorageDocument.parse(parentDocumentId ?: StorageDocument.ROOT)
         val child = StorageDocument.parse(childDocumentId)
-        if (!parent.contains(child)) throw FileNotFoundException("Unknown storage path.")
+        if (!parent.contains(child)) throw FileNotFoundException(localized.getString(R.string.storage_unknown_path))
         phone(child)
         when {
             child.isCardRoot -> image(child)
@@ -142,11 +144,11 @@ class PhoneDocumentsProvider : DocumentsProvider() {
 
     override fun createDocument(parentDocumentId: String, mimeType: String, displayName: String): String = documentIo {
         val parent = StorageDocument.parse(parentDocumentId)
-        if (parent.isCardList) throw IOException(app.getString(R.string.card_documents_choose_card))
-        if (!parent.isCard && !parent.isInternal) throw IOException(app.getString(R.string.phone_documents_choose_storage))
+        if (parent.isCardList) throw IOException(localized.getString(R.string.card_documents_choose_card))
+        if (!parent.isCard && !parent.isInternal) throw IOException(localized.getString(R.string.phone_documents_choose_storage))
         val document = parent.child(displayName.trim())
         if (document.name.last() == '.' || document.name.any { it < ' ' || it in "\"*:<>?|" }) {
-            throw IOException("This filename is not valid.")
+            throw IOException(localized.getString(R.string.storage_invalid_filename))
         }
         synchronized(mutations) {
             if (mimeType == Document.MIME_TYPE_DIR) {
@@ -166,7 +168,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
 
     override fun deleteDocument(documentId: String) = documentIo {
         val document = StorageDocument.parse(documentId)
-        if (!document.isCardFile && !document.isInternalEntry) throw IOException("Cannot delete storage from Files.")
+        if (!document.isCardFile && !document.isInternalEntry) throw IOException(localized.getString(R.string.storage_delete_not_allowed))
         synchronized(mutations) {
             request(document, "delete", snapshot = false)
             writers.remove(writerKey(document))
@@ -178,7 +180,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         signal?.throwIfCanceled()
         val document = StorageDocument.parse(documentId)
         if ((!document.isCardFile && !document.isInternalEntry) || entry(document).getBoolean("directory")) {
-            throw IOException("Select a file.")
+            throw IOException(localized.getString(R.string.storage_select_file))
         }
         if (mode == "r") {
             val temp = export(document)
@@ -195,13 +197,13 @@ class PhoneDocumentsProvider : DocumentsProvider() {
 
     private fun openWriter(document: StorageDocument, mode: String, signal: CancellationSignal?): ParcelFileDescriptor {
         val truncate = mode in setOf("w", "wt", "rwt")
-        if (!truncate && mode != "rw") throw IOException("Unsupported file access mode: $mode")
+        if (!truncate && mode != "rw") throw IOException(localized.getString(R.string.storage_access_mode, mode))
         val token = Any()
         val key = writerKey(document)
         var expectedGeneration: String? = null
         val temp = synchronized(mutations) {
             if (document.isInternal) expectedGeneration = internalRequest(document, "info").getString("generation")
-            if (writers.containsKey(key)) throw IOException("This file is already open for writing.")
+            if (writers.containsKey(key)) throw IOException(localized.getString(R.string.storage_already_open))
             val staging = if (truncate) File.createTempFile("storage-write-", ".tmp", app.cacheDir) else export(document)
             writers[key] = token
             staging
@@ -214,7 +216,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         return stagedWriter(temp, truncate, mode, signal, commit = {
             synchronized(mutations) {
                 if (writers[key] !== token || entry(document).getBoolean("directory")) {
-                    throw IOException("The destination was removed while it was open.")
+                    throw IOException(localized.getString(R.string.storage_destination_removed))
                 }
                 val result = request(document, "import", snapshot = false) {
                     put("host", temp.absolutePath).put("replace", true)
@@ -238,7 +240,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         }
         try {
             val access = if (mode.startsWith('r')) ParcelFileDescriptor.MODE_READ_WRITE else ParcelFileDescriptor.MODE_WRITE_ONLY
-            val storage = app.getSystemService(StorageManager::class.java) ?: throw IOException("Storage service unavailable")
+            val storage = app.getSystemService(StorageManager::class.java) ?: throw IOException(localized.getString(R.string.storage_unavailable))
             return storage.openProxyFileDescriptor(access, callback, writeHandler)
         } catch (error: Exception) {
             callback.abort()
@@ -255,7 +257,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
             val entry = entries.getJSONObject(index)
             if (entry.getString("name") == document.name) return entry
         }
-        throw FileNotFoundException("File no longer exists: ${document.name}")
+        throw FileNotFoundException(localized.getString(R.string.storage_file_missing, document.name))
     }
 
     private fun list(document: StorageDocument): JSONArray = request(document, "list")
@@ -288,7 +290,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         if (response.has("error")) {
             val message = response.getString("error")
             throw IOException(if (message.contains("Card image is in use:")) {
-                app.getString(R.string.card_documents_in_use)
+                localized.getString(R.string.card_documents_in_use)
             } else message)
         }
         response
@@ -302,7 +304,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         val response = JSONObject(NativeBridge.nativeInternalFileRequest(phone.selectionJson(),
             File(app.filesDir, "sessions").absolutePath, phone.memoryWorkspace?.absolutePath.orEmpty(), request.toString()))
         if (response.has("error")) {
-            throw IOException(if (response.optBoolean("running")) app.getString(R.string.phone_internal_power_off)
+            throw IOException(if (response.optBoolean("running")) localized.getString(R.string.phone_internal_power_off)
                 else response.getString("error"))
         }
         return response
@@ -312,17 +314,17 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         internalRequest(document, "info")
         null
     } catch (error: IOException) {
-        error.message ?: app.getString(R.string.phone_internal_power_off)
+        error.message ?: localized.getString(R.string.phone_internal_power_off)
     }
 
     private fun cardDetails(document: StorageDocument, image: File): Pair<String?, String?> = try {
         val info = request(document, "info", snapshot = false, card = image).getJSONObject("info")
-        MemoryStickImages.capacitySummary(app, info) to null
+        MemoryStickImages.capacitySummary(localized, info) to null
     } catch (error: IOException) {
-        null to (error.message ?: app.getString(R.string.card_documents_missing))
+        null to (error.message ?: localized.getString(R.string.card_documents_missing))
     }
 
-    private fun message(key: String, text: Int) = Bundle().apply { putString(key, app.getString(text)) }
+    private fun message(key: String, text: Int) = Bundle().apply { putString(key, localized.getString(text)) }
 
     private fun phones() = FirmwareLibrary.get(app).entries().filter { it.device == "k750i" }
 
@@ -335,7 +337,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
     private fun image(document: StorageDocument): File {
         phone(document)
         val card = document.cardName?.let { MemoryStickImages.find(cards, it) }
-        return card ?: throw FileNotFoundException(app.getString(R.string.card_documents_missing))
+        return card ?: throw FileNotFoundException(localized.getString(R.string.card_documents_missing))
     }
 
     private fun MatrixCursor.addDocument(
@@ -347,17 +349,17 @@ class PhoneDocumentsProvider : DocumentsProvider() {
             when (column) {
                 Document.COLUMN_DOCUMENT_ID -> document.id
                 Document.COLUMN_DISPLAY_NAME -> when {
-                    document.isRoot -> app.getString(R.string.app_name)
+                    document.isRoot -> localized.getString(R.string.app_name)
                     document.isPhone -> requireNotNull(phone).name
-                    document.isInternalRoot -> app.getString(R.string.phone_internal_title)
-                    document.isCardList -> app.getString(R.string.card_documents_title)
-                    card != null -> MemoryStickImages.label(card)
+                    document.isInternalRoot -> localized.getString(R.string.phone_internal_title)
+                    document.isCardList -> localized.getString(R.string.card_documents_title)
+                    card != null -> MemoryStickImages.label(localized, card)
                     else -> document.name
                 }
                 Document.COLUMN_SUMMARY -> when {
-                    document.isCardList -> app.getString(R.string.card_documents_choose_card)
+                    document.isCardList -> localized.getString(R.string.card_documents_choose_card)
                     document.isCardRoot -> cardIssue ?: cardSummary
-                    document.isInternalRoot -> storageIssue ?: app.getString(R.string.phone_internal_power_off)
+                    document.isInternalRoot -> storageIssue ?: localized.getString(R.string.phone_internal_power_off)
                     else -> null
                 }
                 Document.COLUMN_MIME_TYPE -> if (directory) Document.MIME_TYPE_DIR else mimeType(document.name)

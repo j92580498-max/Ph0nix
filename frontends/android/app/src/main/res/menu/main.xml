@@ -2,11 +2,11 @@
 <!-- Adapted from J2ME-Loader app/src/main/res/menu/main.xml, Apache-2.0. -->
 <menu xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto">
-    <item android:id="@+id/action_search" android:title="Search"
+    <item android:id="@+id/action_search" android:title="@string/search"
         app:actionViewClass="androidx.appcompat.widget.SearchView" app:showAsAction="ifRoom|collapseActionView" />
-    <item android:id="@+id/action_view" android:title="List view" app:showAsAction="never" />
-    <item android:id="@+id/action_sort" android:title="Sort" app:showAsAction="never" />
-    <item android:id="@+id/action_settings" android:title="Settings" app:showAsAction="never" />
-    <item android:id="@+id/action_profiles" android:title="Devices" app:showAsAction="never" />
-    <item android:id="@+id/action_about" android:title="About and licenses" app:showAsAction="never" />
+    <item android:id="@+id/action_view" android:title="@string/list_view" app:showAsAction="never" />
+    <item android:id="@+id/action_sort" android:title="@string/sort" app:showAsAction="never" />
+    <item android:id="@+id/action_settings" android:title="@string/settings" app:showAsAction="never" />
+    <item android:id="@+id/action_profiles" android:title="@string/devices" app:showAsAction="never" />
+    <item android:id="@+id/action_about" android:title="@string/about_licenses" app:showAsAction="never" />
 </menu>

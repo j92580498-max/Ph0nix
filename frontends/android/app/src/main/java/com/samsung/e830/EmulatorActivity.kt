@@ -83,14 +83,14 @@ class EmulatorActivity : AppCompatActivity() {
     private var cardBusy = false
     private lateinit var bluetooth: BluetoothBridge
     private var bluetoothStatus: TextView? = null
-    private var bluetoothMessage = "Uses this device's Bluetooth adapter to transfer files to and from the phone. Pair devices in Android settings first."
+    private var bluetoothMessage: String? = null
     private val receivedBluetooth = mutableMapOf<String, JSONObject>()
     private var afterBluetoothPermission: (() -> Unit)? = null
     private val bluetoothPermission = registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
         val action = afterBluetoothPermission
         afterBluetoothPermission = null
         if (result.values.all { it }) action?.invoke()
-        else Toast.makeText(this, "Bluetooth permission is needed to transfer files.", Toast.LENGTH_LONG).show()
+        else Toast.makeText(this, R.string.bluetooth_permission, Toast.LENGTH_LONG).show()
     }
     private val discoverable = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode > 0) runCatching { bluetooth.receive() }.onFailure { showBluetoothMessage(it.message.orEmpty()) }
@@ -105,14 +105,14 @@ class EmulatorActivity : AppCompatActivity() {
             val image = File(directory, "imported-$id.img")
             val staged = File(directory, ".$id.tmp")
             val result = runCatching {
-                check(directory.isDirectory || directory.mkdirs()) { "Could not create the card images folder." }
+                check(directory.isDirectory || directory.mkdirs()) { getString(R.string.card_folder_failed) }
                 try {
-                    val input = contentResolver.openInputStream(uri) ?: error("Could not open the card image.")
+                    val input = contentResolver.openInputStream(uri) ?: error(getString(R.string.card_open_failed))
                     input.use { staged.outputStream().use { output -> copyLimited(input, output, 1024L * 1024L * 1024L) } }
                     val request = JSONObject().put("image", staged.absolutePath).put("operation", "info")
                     val response = JSONObject(NativeBridge.nativeCardRequest(request.toString()))
                     check(!response.has("error")) { response.optString("error") }
-                    check(staged.renameTo(image)) { "Could not save the card image." }
+                    check(staged.renameTo(image)) { getString(R.string.card_save_failed) }
                 } finally {
                     staged.delete()
                 }
@@ -120,8 +120,8 @@ class EmulatorActivity : AppCompatActivity() {
             if (result.isSuccess) notifyMemoryStickChanged(this, image.name)
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                result.onSuccess { Toast.makeText(this, "Card image imported.", Toast.LENGTH_SHORT).show() }
-                    .onFailure { Toast.makeText(this, "Card import failed: ${it.message}", Toast.LENGTH_LONG).show() }
+                result.onSuccess { Toast.makeText(this, R.string.card_imported, Toast.LENGTH_SHORT).show() }
+                    .onFailure { Toast.makeText(this, getString(R.string.card_import_failed, it.localizedMessage ?: getString(R.string.unknown_error)), Toast.LENGTH_LONG).show() }
             }
         }
     }
@@ -134,7 +134,7 @@ class EmulatorActivity : AppCompatActivity() {
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                val message = result.fold({ "Card image exported." }, { "Export failed: ${it.message}" })
+                val message = result.fold({ getString(R.string.card_exported) }, { getString(R.string.export_failed, it.localizedMessage ?: getString(R.string.unknown_error)) })
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             }
         }
@@ -160,9 +160,9 @@ class EmulatorActivity : AppCompatActivity() {
                 receivedBluetooth[file.getString("path")] = file
                 if (!isFinishing && !isDestroyed) {
                     val destination = listOf("Phone memory", "Other")
-                    MaterialAlertDialogBuilder(this).setTitle("Import ${file.optString("name")}?")
-                        .setMessage("Received ${file.optLong("bytes")} bytes via Bluetooth. Import into /${destination.joinToString("/")}/.")
-                        .setNegativeButton("Keep in inbox", null).setPositiveButton("Import") { _, _ ->
+                    MaterialAlertDialogBuilder(this).setTitle(getString(R.string.bluetooth_import_title, file.optString("name")))
+                        .setMessage(getString(R.string.bluetooth_import_description, file.optLong("bytes"), destination.joinToString("/")))
+                        .setNegativeButton(R.string.bluetooth_keep_inbox, null).setPositiveButton(R.string.import_file) { _, _ ->
                             enqueueFile(JSONObject().put("operation", "import").put("path", JSONArray(destination + file.getString("name")))
                                 .put("host", file.getString("path")).put("replace", false).put("move_source", true)) {
                                 File(file.getString("path") + ".json").delete()
@@ -183,9 +183,9 @@ class EmulatorActivity : AppCompatActivity() {
         fullscreenButton = findViewById(R.id.btn_fullscreen)
         val device = runCatching { JSONObject(selection).getString("device") }.getOrDefault("k750i")
         toolbar.title = runCatching { DeviceProfiles.get(device).name }.getOrDefault(getString(R.string.firmware_title))
-        toolbar.menu.add(0, MENU_BLUETOOTH, 1, "Bluetooth files")
-        toolbar.menu.add(0, MENU_CARDS, 2, "Card images")
-        toolbar.menu.add(0, MENU_DEVELOPER, 3, "Developer")
+        toolbar.menu.add(0, MENU_BLUETOOTH, 1, R.string.bluetooth_files)
+        toolbar.menu.add(0, MENU_CARDS, 2, R.string.card_images)
+        toolbar.menu.add(0, MENU_DEVELOPER, 3, R.string.diagnostics_menu)
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 MENU_BLUETOOTH -> showBluetooth()
@@ -307,7 +307,7 @@ class EmulatorActivity : AppCompatActivity() {
                     File(filesDir, "sessions").absolutePath, preferences.resume,
                 )
                 NativeBridge.nativeStartSelection(selection, intent.getStringExtra(EXTRA_MEMORY_WORKSPACE).orEmpty(), bootCard).also {
-                    check(it != 0L) { "Could not start the phone." }
+                    check(it != 0L) { getString(R.string.phone_start_failed) }
                 }
             } catch (error: Throwable) {
                 runOnUiThread {
@@ -316,7 +316,7 @@ class EmulatorActivity : AppCompatActivity() {
                         audioPlayer?.close()
                         audioPlayer = null
                         waiting.visibility = View.GONE
-                        status.text = error.message ?: "Could not start the phone."
+                        status.text = error.message ?: getString(R.string.phone_start_failed)
                     }
                 }
                 return@execute
@@ -368,8 +368,16 @@ class EmulatorActivity : AppCompatActivity() {
                 val files = if (sampleServices) JSONObject(NativeBridge.nativeFiles(handle)) else null
                 runOnUiThread {
                     if (generation.get() == token && sessionHandle.get() == handle) {
-                        if (status.text.toString() != message) status.text = message
                         frame?.let { lcd.setFrame(it); waiting.visibility = View.GONE }
+                        val statusText = when {
+                            !running -> message
+                            waiting.visibility == View.VISIBLE -> getString(R.string.emulator_starting)
+                            diagnostic != null -> getString(
+                                R.string.emulator_running, toolbar.title, diagnostic.optLong("guest_virtual_ns") / 1e9,
+                            )
+                            else -> null
+                        }
+                        if (statusText != null && status.text.toString() != statusText) status.text = statusText
                         diagnostic?.let { showDiagnostics(it, token, handle) }
                         files?.let { updateFiles(it) }
                         if (!running) stopSession()
@@ -381,7 +389,7 @@ class EmulatorActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (generation.get() == token) {
                         diagnostic?.let { showDiagnostics(it, token, handle) }
-                        status.text = error.message ?: "The phone stopped unexpectedly."
+                        status.text = error.message ?: getString(R.string.phone_stopped_unexpectedly)
                         stopSession()
                     }
                 }
@@ -398,8 +406,8 @@ class EmulatorActivity : AppCompatActivity() {
         }
         leaving = true
         if (fullscreen) setFullscreen(false)
-        status.text = if (bootCard.isBlank()) "Saving phone memory…"
-            else "Saving the Memory Stick and phone memory. This can take about 30 seconds."
+        status.text = if (bootCard.isBlank()) getString(R.string.phone_saving_memory)
+            else getString(R.string.phone_saving_card)
         stopSession()
     }
 
@@ -431,9 +439,9 @@ class EmulatorActivity : AppCompatActivity() {
                     status.text = error
                     if (leaving) {
                         MaterialAlertDialogBuilder(this)
-                            .setTitle("The phone stopped with an error")
+                            .setTitle(R.string.phone_stopped_error)
                             .setMessage(error)
-                            .setPositiveButton("OK", null)
+                            .setPositiveButton(android.R.string.ok, null)
                             .show()
                     }
                     leaving = false
@@ -494,7 +502,7 @@ class EmulatorActivity : AppCompatActivity() {
     private fun enqueueFile(request: JSONObject, completed: ((JSONObject) -> Unit)? = null): Boolean {
         if (isFinishing || isDestroyed) return false
         if (pendingFiles.size >= 8) {
-            showBluetoothMessage("The transfer queue is full. Wait for a transfer to finish.")
+            showBluetoothMessage(getString(R.string.bluetooth_queue_full))
             return false
         }
         pendingFiles.addLast(PendingFile(request, completed))
@@ -538,10 +546,10 @@ class EmulatorActivity : AppCompatActivity() {
             val succeeded = job.optString("phase") == "complete" && job.isNull("error")
             if (succeeded) {
                 action?.completed?.invoke(job)
-                showBluetoothMessage("File saved to Phone memory/Other.")
+                showBluetoothMessage(getString(R.string.bluetooth_saved))
             } else {
                 showBluetoothMessage(job.optString("error").takeUnless { job.isNull("error") || it.isBlank() }
-                    ?: "Transfer interrupted. The source was kept.")
+                    ?: getString(R.string.bluetooth_interrupted))
             }
         }
         if (job != null && !job.isNull("error") && job.optLong("id") != lastFileErrorId) {
@@ -576,40 +584,40 @@ class EmulatorActivity : AppCompatActivity() {
                     val accepted = enqueueFile(JSONObject().put("operation", "import").put("path", JSONArray(destination + name))
                         .put("host", staging!!.absolutePath).put("replace", false).put("move_source", true))
                     if (!accepted) staging?.delete()
-                }.onFailure { staging?.delete(); showBluetoothMessage("Import failed: ${it.message}") }
+                }.onFailure { staging?.delete(); showBluetoothMessage(getString(R.string.import_failed, it.localizedMessage ?: getString(R.string.unknown_error))) }
             }
         }
     }
 
     private fun showCards() {
         val cards = MemoryStickImages.list(MemoryStickImages.directory(filesDir))
-        val labels = listOf("Create image…", "Import image…") + cards.map {
-            val label = MemoryStickImages.label(it)
-            if (it.absolutePath == bootCard) "$label (inserted)" else label
+        val labels = listOf(R.string.card_create, R.string.card_import).map(::getString) + cards.map {
+            val label = MemoryStickImages.label(this, it)
+            if (it.absolutePath == bootCard) getString(R.string.card_inserted_label, label) else label
         }
-        MaterialAlertDialogBuilder(this).setTitle("Removable card images")
+        MaterialAlertDialogBuilder(this).setTitle(R.string.card_removable_images)
             .setItems(labels.toTypedArray()) { _, index ->
                 when (index) {
                     0 -> createCard()
                     1 -> importCardDocument.launch(arrayOf("*/*"))
                     else -> cardActions(cards[index - 2])
                 }
-            }.setNegativeButton("Close", null).show()
+            }.setNegativeButton(R.string.close, null).show()
     }
 
     private fun createCard() {
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(dp(20), 0, dp(20), 0) }
-        val name = android.widget.EditText(this).apply { hint = "Image name"; setText("ph0nix-card"); isSingleLine = true }
-        val size = android.widget.EditText(this).apply { hint = "Size in MiB (16–1024)"; setText("64"); inputType = android.text.InputType.TYPE_CLASS_NUMBER }
+        val name = android.widget.EditText(this).apply { hint = getString(R.string.card_image_name); setText("ph0nix-card"); isSingleLine = true }
+        val size = android.widget.EditText(this).apply { hint = getString(R.string.card_image_size); setText("64"); inputType = android.text.InputType.TYPE_CLASS_NUMBER }
         layout.addView(name); layout.addView(size)
-        MaterialAlertDialogBuilder(this).setTitle("Create FAT16 card image").setView(layout)
-            .setMessage("Choose this image from the library when starting K750i.")
-            .setNegativeButton("Cancel", null).setPositiveButton("Create") { _, _ ->
+        MaterialAlertDialogBuilder(this).setTitle(R.string.card_create_fat16).setView(layout)
+            .setMessage(R.string.card_choose_at_start)
+            .setNegativeButton(R.string.cancel, null).setPositiveButton(R.string.create) { _, _ ->
                 val label = name.text.toString().trim()
                 val mib = size.text.toString().toLongOrNull()
                 if (!StorageDocument.validComponent(label) || !MemoryStickImages.validName("$label.img") ||
                     mib == null || mib !in 16L..1024L) {
-                    Toast.makeText(this, "Choose an image name and a size from 16 to 1024 MiB.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, R.string.card_invalid_name_or_size, Toast.LENGTH_LONG).show()
                     return@setPositiveButton
                 }
                 val image = File(MemoryStickImages.directory(filesDir), "$label.img")
@@ -620,25 +628,25 @@ class EmulatorActivity : AppCompatActivity() {
     private fun cardActions(image: File) {
         if (image.absolutePath == bootCard) {
             MaterialAlertDialogBuilder(this).setTitle(image.name)
-                .setMessage("This Memory Stick is inserted. Use the K750i file manager, or stop the phone to work with the image.")
-                .setPositiveButton("Close", null).show()
+                .setMessage(R.string.card_inserted_description)
+                .setPositiveButton(R.string.close, null).show()
             return
         }
         MaterialAlertDialogBuilder(this).setTitle(image.name)
-            .setMessage("FAT16 image · ${image.length() / 1048576} MiB. Choose this image from the library when starting K750i.")
-            .setNeutralButton("Export image…") { _, _ ->
+            .setMessage(getString(R.string.card_fat16_description, image.length() / 1048576, getString(R.string.card_choose_at_start)))
+            .setNeutralButton(R.string.card_export) { _, _ ->
                 if (image.isFile && image.length() > 0) {
                     documentExport = image
                     exportDocument.launch(image.name)
                 } else {
-                    Toast.makeText(this, "The card image is missing or empty.", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, R.string.card_missing_or_empty, Toast.LENGTH_LONG).show()
                 }
-            }.setNegativeButton("Close", null).show()
+            }.setNegativeButton(R.string.close, null).show()
     }
 
     private fun createCardImage(image: File, mib: Long) {
         if (cardBusy) {
-            Toast.makeText(this, "Another card image is being created.", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, R.string.card_busy, Toast.LENGTH_SHORT).show()
             return
         }
         cardBusy = true
@@ -652,7 +660,7 @@ class EmulatorActivity : AppCompatActivity() {
             runOnUiThread {
                 cardBusy = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
-                val message = result.fold({ "Card image created." }, { "Could not create card image: ${it.message}" })
+                val message = result.fold({ getString(R.string.card_created) }, { getString(R.string.card_create_failed, it.localizedMessage ?: getString(R.string.unknown_error)) })
                 Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             }
         }
@@ -665,7 +673,7 @@ class EmulatorActivity : AppCompatActivity() {
             val count = input.read(buffer)
             if (count < 0) break
             total += count
-            check(total <= maximum) { "File exceeds ${maximum / 1048576} MiB limit." }
+            check(total <= maximum) { getString(R.string.file_exceeds_limit, maximum / 1048576) }
             output.write(buffer, 0, count)
         }
     }
@@ -676,12 +684,12 @@ class EmulatorActivity : AppCompatActivity() {
     }
 
     private fun showBluetooth() {
-        val text = TextView(this).apply { this.text = bluetoothMessage; setPadding(dp(20), dp(16), dp(20), dp(16)) }
+        val text = TextView(this).apply { this.text = bluetoothMessage ?: getString(R.string.bluetooth_description); setPadding(dp(20), dp(16), dp(20), dp(16)) }
         bluetoothStatus = text
         val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; addView(text) }
-        listOf("Receive a file…", "Received files", "Import received file…", "Cancel transfer").forEachIndexed { choice, label ->
+        listOf(R.string.bluetooth_receive, R.string.bluetooth_inbox, R.string.bluetooth_import_received, R.string.bluetooth_cancel).forEachIndexed { choice, label ->
             layout.addView(MaterialButton(this, null, com.google.android.material.R.attr.materialButtonOutlinedStyle).apply {
-                this.text = label; isAllCaps = false
+                setText(label); isAllCaps = false
                 setOnClickListener { when (choice) {
                     0 -> withBluetoothPermission(advertise = true) {
                         discoverable.launch(Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE)
@@ -693,8 +701,8 @@ class EmulatorActivity : AppCompatActivity() {
                 } }
             })
         }
-        MaterialAlertDialogBuilder(this).setTitle("Bluetooth files").setView(layout)
-            .setPositiveButton("Close", null).show()
+        MaterialAlertDialogBuilder(this).setTitle(R.string.bluetooth_files).setView(layout)
+            .setPositiveButton(R.string.close, null).show()
     }
 
     private fun showBluetoothInbox() {
@@ -703,15 +711,15 @@ class EmulatorActivity : AppCompatActivity() {
             .orEmpty()
         val records = (savedRecords + receivedBluetooth.values).distinctBy { it.optString("path") }
             .filter { File(it.optString("path")).isFile }
-        if (records.isEmpty()) { Toast.makeText(this, "No received files in the inbox.", Toast.LENGTH_SHORT).show(); return }
-        MaterialAlertDialogBuilder(this).setTitle("Received files").setItems(records.map { it.optString("name") }.toTypedArray()) { _, index ->
+        if (records.isEmpty()) { Toast.makeText(this, R.string.bluetooth_inbox_empty, Toast.LENGTH_SHORT).show(); return }
+        MaterialAlertDialogBuilder(this).setTitle(R.string.bluetooth_inbox).setItems(records.map { it.optString("name") }.toTypedArray()) { _, index ->
             val record = records[index]
             val destination = listOf("Phone memory", "Other")
             enqueueFile(JSONObject().put("operation", "import").put("path", JSONArray(destination + record.getString("name")))
                 .put("host", record.getString("path")).put("replace", false).put("move_source", true)) {
                 File(record.getString("path") + ".json").delete()
             }
-        }.setNegativeButton("Close", null).show()
+        }.setNegativeButton(R.string.close, null).show()
     }
 
     private fun withBluetoothPermission(advertise: Boolean = false, action: () -> Unit) {
@@ -778,7 +786,7 @@ class EmulatorActivity : AppCompatActivity() {
         insetTop = 1; insetBottom = 1
         minHeight = 0; minimumHeight = 0; minWidth = 0; minimumWidth = 0
         setPadding(4, 0, 4, 0)
-        contentDescription = "Phone ${binding.label}"
+        contentDescription = getString(R.string.key_description, binding.label)
         setOnTouchListener { view, event ->
             when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
