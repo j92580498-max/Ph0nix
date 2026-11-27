@@ -3,12 +3,17 @@ package com.samsung.e830
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
-import android.view.View
+import android.text.InputFilter
+import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
+import android.view.View
+import android.view.WindowManager
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.appcompat.widget.Toolbar
 import androidx.appcompat.widget.SearchView
@@ -102,6 +107,7 @@ class MainActivity : AppCompatActivity() {
         importButton = requireNotNull(findViewById<FloatingActionButton>(R.id.fab_import))
         adapter = FirmwareAdapter(
             onRun = ::runFirmware,
+            onRename = ::showRenameDialog,
             onSelectOneNand = ::chooseOneNand,
             onUseErasedFlash = ::useAutomaticNand,
             onExportMemory = ::chooseMemoryExport,
@@ -533,6 +539,48 @@ class MainActivity : AppCompatActivity() {
                 .putExtra(EmulatorActivity.EXTRA_MEMORY_WORKSPACE, entry.memoryWorkspace?.absolutePath)
                 .putExtra(EmulatorActivity.EXTRA_CARD_IMAGE, card?.absolutePath),
         )
+    }
+
+    private fun showRenameDialog(entry: FirmwareEntry) {
+        if (busy) return
+        val builder = MaterialAlertDialogBuilder(this)
+        val view = LayoutInflater.from(builder.context).inflate(R.layout.dialog_rename_phone, null)
+        val input = view.findViewById<EditText>(R.id.phone_name)
+        input.filters = arrayOf(InputFilter.LengthFilter(FirmwareLibrary.MAX_NAME_LENGTH))
+        input.setText(entry.name)
+        val dialog = builder.setTitle(R.string.rename_phone_title)
+            .setView(view)
+            .setNegativeButton(R.string.cancel, null)
+            .setPositiveButton(R.string.rename, null)
+            .create()
+        input.requestFocus()
+        input.selectAll()
+        dialog.window?.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+        dialog.show()
+        dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+            val name = input.text.toString().trim()
+            if (name.isEmpty()) {
+                input.error = getString(R.string.phone_name_required)
+            } else {
+                dialog.dismiss()
+                if (name != entry.name) renamePhone(entry.id, name)
+            }
+        }
+    }
+
+    private fun renamePhone(id: String, name: String) {
+        if (busy) return
+        setBusy(true)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) { runCatching { library.rename(id, name) } }
+            setBusy(false)
+            result.onSuccess {
+                refreshLibrary()
+                showMessage(getString(R.string.phone_renamed, name))
+            }.onFailure { error ->
+                showMessage(error.message ?: getString(R.string.rename_phone_failed))
+            }
+        }
     }
 
     private fun confirmRemove(entry: FirmwareEntry) {

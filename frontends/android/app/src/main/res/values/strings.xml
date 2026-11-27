@@ -22,6 +22,13 @@
     <string name="nand_select_title">Select a physical E830 OneNAND image</string>
     <string name="nand_hint">Accepted sizes: 32 MiB main-only or 1024+32 bytes per page. A .tfs package is not a NAND dump.</string>
     <string name="source_files_untouched">Imported files are copied privately; originals are never modified.</string>
+    <string name="rename_phone">Rename phone…</string>
+    <string name="rename_phone_title">Rename phone</string>
+    <string name="phone_name">Phone name</string>
+    <string name="phone_name_required">Enter a phone name.</string>
+    <string name="rename">Rename</string>
+    <string name="phone_renamed">Phone renamed to %1$s</string>
+    <string name="rename_phone_failed">Could not rename the phone.</string>
     <string name="remove_firmware">Remove firmware set</string>
     <string name="remove_title">Remove firmware?</string>
     <string name="remove_message">Remove %1$s from this app? Source files are not changed.</string>

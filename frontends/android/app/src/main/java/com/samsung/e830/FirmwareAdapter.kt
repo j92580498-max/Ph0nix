@@ -10,6 +10,7 @@ import androidx.recyclerview.widget.RecyclerView
 
 internal class FirmwareAdapter(
     private val onRun: (FirmwareEntry) -> Unit,
+    private val onRename: (FirmwareEntry) -> Unit,
     private val onSelectOneNand: (FirmwareEntry) -> Unit,
     private val onUseErasedFlash: (FirmwareEntry) -> Unit,
     private val onExportMemory: (FirmwareEntry) -> Unit,
@@ -52,6 +53,7 @@ internal class FirmwareAdapter(
         private fun showMenu(anchor: View, entry: FirmwareEntry) {
             val popup = PopupMenu(anchor.context, anchor)
             popup.menu.add(0, ACTION_RUN, 0, R.string.run_firmware)
+            popup.menu.add(0, ACTION_RENAME, 0, R.string.rename_phone)
             if (entry.profile.hasNand) popup.menu.add(0, ACTION_SELECT_NAND, 0, R.string.nand_select)
             if (entry.onenand != null) {
                 popup.menu.add(0, ACTION_USE_ERASED, 1, R.string.nand_auto)
@@ -64,6 +66,7 @@ internal class FirmwareAdapter(
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     ACTION_RUN -> onRun(entry)
+                    ACTION_RENAME -> onRename(entry)
                     ACTION_SELECT_NAND -> onSelectOneNand(entry)
                     ACTION_USE_ERASED -> onUseErasedFlash(entry)
                     ACTION_EXPORT_MEMORY -> onExportMemory(entry)
@@ -83,5 +86,6 @@ internal class FirmwareAdapter(
         const val ACTION_RUN = 4
         const val ACTION_EXPORT_MEMORY = 5
         const val ACTION_IMPORT_MEMORY = 6
+        const val ACTION_RENAME = 7
     }
 }

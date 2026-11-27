@@ -66,7 +66,7 @@ internal class FirmwareLibrary(context: Context) {
                 val extension = source.second.substringAfterLast('.').lowercase(Locale.ROOT)
                 copyUri(source.first, File(staging, "$role.$extension"))
             }
-            val display = image.second.substringBeforeLast('.', image.second).ifBlank { profile.name }.take(80)
+            val display = image.second.substringBeforeLast('.', image.second).ifBlank { profile.name }.take(MAX_NAME_LENGTH)
             val staged = FirmwareEntry(id, display, staging, device, files)
             val error = if (device == "k750i") {
                 // Publish the new machine and its initial flash together.
@@ -84,6 +84,17 @@ internal class FirmwareLibrary(context: Context) {
             destination.deleteRecursively()
             throw error
         }
+    }
+
+    @Synchronized
+    fun rename(id: String, name: String) {
+        val display = name.trim()
+        require(display.isNotEmpty() && display.length <= MAX_NAME_LENGTH) { "Invalid phone name." }
+        ensureRecovered()
+        val records = readRecords()
+        val record = records.firstOrNull { it.id == id } ?: throw IOException("This phone no longer exists.")
+        if (record.name == display) return
+        writeRecords(records.map { if (it.id == id) it.copy(name = display) else it })
     }
 
     @Synchronized
@@ -256,7 +267,7 @@ internal class FirmwareLibrary(context: Context) {
                                 put(role, file)
                             }
                         }
-                        add(Record(id, name.take(80), device, files))
+                        add(Record(id, name.take(MAX_NAME_LENGTH), device, files))
                     }
                 }
             }
@@ -282,8 +293,9 @@ internal class FirmwareLibrary(context: Context) {
     private data class Record(val id: String, val name: String, val device: String, val files: Map<String, String>)
     private fun FirmwareEntry.record() = Record(id, name, device, files.mapValues { it.value.name })
 
-    private companion object {
-        const val MAX_FILE_BYTES = 128L * 1024L * 1024L
-        val ID_PATTERN = Regex("^[0-9a-fA-F-]{36}$")
+    companion object {
+        const val MAX_NAME_LENGTH = 80
+        private const val MAX_FILE_BYTES = 128L * 1024L * 1024L
+        private val ID_PATTERN = Regex("^[0-9a-fA-F-]{36}$")
     }
 }
