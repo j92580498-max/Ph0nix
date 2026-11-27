@@ -123,6 +123,22 @@ impl Worker {
         if card.is_some() && paths.device != "k750i" {
             return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Select the K750i to use a Memory Stick"));
         }
+        let k750 = (|| -> anyhow::Result<_> {
+            if paths.device != "k750i" { return Ok(None); }
+            let options = match options {
+                Some(options) => options,
+                None => HostOptions::discover(&std::env::current_dir()?)?,
+            };
+            anyhow::ensure!(paths.files.companions.keys().all(|key| key == "fs"),
+                "The native K750 profile accepts its audited MAIN and FS images; use the research runner for physical ROM/GDFS overrides.");
+            let fs = paths.files.companions.get("fs")
+                .ok_or_else(|| anyhow::anyhow!("Select the matching FS .fbn image."))?.clone();
+            let directory = match workspace {
+                Some(directory) => directory,
+                None => db2010_host::prepare::workspace(&paths.files.image, &fs, &options.data_dir)?,
+            };
+            Ok(Some((options, fs, db2010_host::prepare::LockedWorkspace::try_open(directory)?)))
+        })().map_err(std::io::Error::other)?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let (sender, events) = event_channel();
@@ -139,18 +155,8 @@ impl Worker {
             // Unicorn owns Rc state and must be constructed inside this thread.
             let result = (|| -> anyhow::Result<String> {
                 worker_diagnostics.log("info", "worker", format!("Starting {} firmware.", paths.device));
-                if paths.device == "k750i" {
-                    let options = match options {
-                        Some(options) => options,
-                        None => HostOptions::discover(&std::env::current_dir()?)?,
-                    };
-                    anyhow::ensure!(paths.files.companions.keys().all(|key| key == "fs"),
-                        "The native K750 profile accepts its audited MAIN and FS images; use the research runner for physical ROM/GDFS overrides.");
-                    let fs = paths.files.companions.get("fs").ok_or_else(|| anyhow::anyhow!("Select the matching FS .fbn image."))?;
-                    let prepared = match workspace {
-                        Some(directory) => db2010_host::prepare::prepare_locked_at(&paths.files.image, fs, &directory)?,
-                        None => db2010_host::prepare::prepare_locked(&paths.files.image, fs, &options.data_dir)?,
-                    };
+                if let Some((options, fs, workspace)) = k750 {
+                    let prepared = workspace.prepare(&paths.files.image, &fs)?;
                     let mut session = Session::start_prepared_with_card(&options, prepared,
                         worker_audio, worker_files.clone(), worker_diagnostics.clone(), worker_card.as_deref())?;
                     let result = (|| -> anyhow::Result<()> {

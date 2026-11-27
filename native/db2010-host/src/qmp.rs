@@ -615,7 +615,7 @@ fn remove_checkpoint_files(workspace:&Path, saved:SavedCheckpoint) {
     if let Some(flash)=saved.flash { flash.remove(workspace); }
 }
 
-fn remove_old_checkpoint(workspace:&Path) {
+pub(crate) fn remove_old_checkpoint(workspace:&Path) {
     let metadata=workspace.join("phone.saved.json");
     if let Ok(saved)=read_checkpoint(&metadata) {
         if fs::remove_file(metadata).is_ok() { remove_checkpoint_files(workspace,saved); }

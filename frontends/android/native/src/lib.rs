@@ -155,17 +155,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeTransferInternal
     importing: jboolean,
 ) -> jstring {
     let result = (|| -> Result<(), String> {
-        let selection: FirmwareSelection = serde_json::from_str(&read_string(&mut env, &json)?)
-            .map_err(|error| error.to_string())?;
-        let fs = memory_selection(&selection)?;
-        let workspace = read_string(&mut env, &workspace)?;
-        let workspace = if workspace.is_empty() {
-            db2010_host::prepare::workspace(
-                &selection.files.image, fs, &path(read_string(&mut env, &data_directory)?),
-            ).map_err(|error| format!("{error:#}"))?
-        } else {
-            path(workspace)
-        };
+        let workspace = internal_workspace(&mut env, &json, &data_directory, &workspace)?;
         let file = path(read_string(&mut env, &file)?);
         if importing != 0 {
             db2010_host::qmp::import_internal_memory(&workspace, &file)
@@ -174,6 +164,40 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeTransferInternal
         }.map_err(|error| format!("{error:#}"))
     })();
     new_string(&mut env, &result.err().unwrap_or_default())
+}
+
+fn internal_workspace(
+    env: &mut JNIEnv<'_>, selection: &JString<'_>, data_directory: &JString<'_>, workspace: &JString<'_>,
+) -> Result<PathBuf, String> {
+    let selection: FirmwareSelection = serde_json::from_str(&read_string(env, selection)?)
+        .map_err(|error| error.to_string())?;
+    let fs = memory_selection(&selection)?;
+    let workspace = read_string(env, workspace)?;
+    if workspace.is_empty() {
+        db2010_host::prepare::workspace(&selection.files.image, fs, &path(read_string(env, data_directory)?))
+            .map_err(|error| format!("{error:#}"))
+    } else {
+        Ok(path(workspace))
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeInternalFileRequest<'local>(
+    mut env: JNIEnv<'local>, _this: JObject<'local>, selection: JString<'local>,
+    data_directory: JString<'local>, workspace: JString<'local>, request: JString<'local>,
+) -> jstring {
+    use db2010_host::storage::internal;
+    use serde_json::json;
+    let result = (|| -> Result<serde_json::Value, String> {
+        let workspace = internal_workspace(&mut env, &selection, &data_directory, &workspace)?;
+        let request = serde_json::from_str(&read_string(&mut env, &request)?).map_err(|error| error.to_string())?;
+        Ok(match internal::request(&workspace, request) {
+            Ok(response) => response,
+            Err(error) => json!({"error":format!("{error:#}"), "running":error.is::<internal::InUse>()}),
+        })
+    })();
+    let response = result.unwrap_or_else(|error| json!({"error":error}));
+    new_string(&mut env, &response.to_string())
 }
 
 #[no_mangle]

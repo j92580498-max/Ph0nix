@@ -4,7 +4,7 @@ use anyhow::{ensure, Context, Result};
 use db2010_host::{
     prepare,
     qmp::{export_internal_memory, import_internal_memory, Session},
-    storage::{internal_other_path, FileEntry, FileJob, FileRequest},
+    storage::{internal::{self, InUse, Request}, internal_other_path, FileEntry, FileJob, FileRequest},
     HostOptions, LcdFrame,
 };
 use std::{
@@ -181,8 +181,19 @@ fn assert_no_checkpoint(workspace: &Path) -> Result<()> {
     Ok(())
 }
 
-fn verify_pause(session: &mut Session) -> Result<()> {
+fn assert_internal_locked(workspace: &Path) -> Result<()> {
+    for request in [Request::Info { path: vec![] }, Request::List { path: vec![] },
+        Request::MakeDirectory { path: vec!["must-not-be-created".into()] }] {
+        let error = internal::request(workspace, request).expect_err("In-use memory was accessible");
+        ensure!(error.is::<InUse>(), "Expected an in-use error, got {error:#}");
+    }
+    Ok(())
+}
+
+fn verify_pause(session: &mut Session, workspace: &Path) -> Result<()> {
+    assert_internal_locked(workspace)?;
     session.pause()?;
+    assert_internal_locked(workspace)?;
     ensure!(!session.running()?, "Paused VM still reports running");
     let frozen = session.progress()?;
     thread::sleep(Duration::from_millis(750));
@@ -199,6 +210,31 @@ fn verify_pause(session: &mut Session) -> Result<()> {
     }
     ensure!(session.running()?, "VM did not return to running after resume");
     println!("{}", serde_json::json!({"in_memory_pause_resume":"passed"}));
+    Ok(())
+}
+
+fn verify_offline(workspace: &Path, other_phone: &Path, source: &Path) -> Result<()> {
+    let old_path = vec!["other".into(), "ph0nix-resume-test.txt".into()];
+    let exported = workspace.join("offline-received.txt");
+    internal::request(workspace, Request::Export { path: old_path, host: exported.clone() })?;
+    ensure!(fs::read(&exported)? == fs::read(source)?, "Offline export of the firmware's file differs");
+    fs::remove_file(exported)?;
+
+    let path = vec!["image".into(), "ph0nix-offline.txt".into()];
+    let other_generation = memory_generation(other_phone)?;
+    let before = internal::request(workspace, Request::Info { path: vec![] })?;
+    internal::request(workspace, Request::Import {
+        path: path.clone(), host: source.to_owned(), replace: false, generation: None,
+    })?;
+    let after = memory_generation(workspace)?;
+    ensure!(other_generation == memory_generation(other_phone)?, "Offline import changed the second phone");
+    let old_generation = before["generation"].as_str().context("Missing memory generation")?;
+    let error = internal::request(workspace, Request::Import {
+        path, host: source.to_owned(), replace: true, generation: Some(old_generation.into()),
+    }).expect_err("An obsolete writer replaced a file");
+    ensure!(error.to_string().contains("memory changed") && after == memory_generation(workspace)?,
+        "Unexpected stale writer result: {error:#}");
+    println!("{{\"offline_memory_write\":\"passed\"}}");
     Ok(())
 }
 
@@ -254,6 +290,7 @@ fn main() -> Result<()> {
         b"ph0nix file transfer remains usable after save and resume\n",
     )?;
     let inbox = std::env::var_os("PH0NIX_TEST_ANDROID_INBOX").is_some();
+    let offline = std::env::var_os("PH0NIX_TEST_ANDROID_OFFLINE").is_some();
     let staged = workspace.join("ph0nix-resume-test.txt");
     if inbox {
         ensure!(fresh.is_some(), "The Android inbox test requires a fresh phone");
@@ -287,7 +324,7 @@ fn main() -> Result<()> {
             wait_for_serial(&mut session, &workspace, "initial-boot", 240)?;
             finish_first_setup(&mut session)?;
         }
-        if fresh.is_some() { verify_pause(&mut session)?; }
+        if fresh.is_some() { verify_pause(&mut session, &workspace)?; }
         if inbox && !imported {
             if let Err(error) = run(&mut session, FileRequest::ImportInternal {
                 name: "ph0nix-resume-test.txt".into(), host: staged.clone(),
@@ -325,6 +362,11 @@ fn main() -> Result<()> {
         );
         // Deliberately leave the file service connected; Session owns safe quiescence.
         session.save_with_resume(!cold_boot)?;
+        if fresh.is_some() { assert_internal_locked(&workspace)?; }
+    }
+    if offline {
+        let (other, ..) = fresh.as_ref().context("Offline memory test requires a fresh phone")?;
+        verify_offline(&workspace, other, &source)?;
     }
     let state = if cold_boot {
         if fresh.is_some() {
@@ -408,6 +450,18 @@ fn main() -> Result<()> {
             fs::read(output)? == fs::read(source)?,
             "Export contents after restart differ"
         );
+        if offline {
+            let root = directory.get(..directory.len().saturating_sub(1)).unwrap_or_default();
+            let pictures = list(&mut session, root.to_vec())?.into_iter().find(|entry|
+                entry.directory && matches!(entry.name.as_str(), "Pictures" | "Изображения"))
+                .context("Missing K750i Pictures directory")?.name;
+            let mut path = root.to_vec();
+            path.extend([pictures, "ph0nix-offline.txt".into()]);
+            let output = workspace.join("offline-after-boot.txt");
+            run(&mut session, FileRequest::Export { path, host: output.clone(), move_source: false })?;
+            ensure!(fs::read(output)? == fs::read(&source)?, "K750i did not read the offline file after boot");
+            println!("{{\"offline_memory_firmware_readback\":\"passed\"}}");
+        }
         run(&mut session, FileRequest::Delete { path })?;
         println!(
             "{}",

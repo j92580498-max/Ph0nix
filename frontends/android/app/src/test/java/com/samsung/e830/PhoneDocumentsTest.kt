@@ -110,6 +110,22 @@ class PhoneDocumentsTest {
     }
 
     @Test
+    fun internalMemoryUsesTheSelectedPhoneAndFolder() {
+        val provider = PhoneDocumentsProvider()
+        val phone = "phones/b310d433-2f28-4efe-b6b7-195f175b8f8a"
+        val other = "phones/4d97e4e1-b294-4a50-adc8-f6f484c3324b"
+        val internal = "$phone/internal"
+        val picture = "$internal/image/photo.jpg"
+        val parsed = StorageDocument.parse(picture)
+        assertTrue(parsed.isInternalEntry)
+        assertEquals(listOf("image", "photo.jpg"), parsed.internalPath)
+        assertTrue(provider.isChildDocument(internal, picture))
+        assertTrue(!provider.isChildDocument(internal, "$other/internal/image/photo.jpg"))
+        assertThrows(IOException::class.java) { StorageDocument.parse("$internal/../card") }
+        assertThrows(IOException::class.java) { StorageDocument.parse("$phone/inbox") }
+    }
+
+    @Test
     fun selectedCardDocumentResolvesOnlyItsOwnImage() {
         val cards = temporary.newFolder("cards")
         val first = cards.resolve("first.img").apply { writeText("first") }

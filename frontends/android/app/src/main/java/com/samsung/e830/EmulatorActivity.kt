@@ -375,6 +375,7 @@ class EmulatorActivity : AppCompatActivity() {
                 return@execute
             }
             sessionHandle.set(handle)
+            notifyInternalStorageChanged(this, phoneId)
             if (bootCard.isNotBlank()) notifyMemoryStickChanged(this, File(bootCard).name)
             // A stop requested during startup is queued behind this task.
             if (generation.get() != token) return@execute
@@ -474,11 +475,9 @@ class EmulatorActivity : AppCompatActivity() {
         nativeExecutor.execute {
             val handle = sessionHandle.getAndSet(0)
             val (error, report) = if (handle != 0L) stopAndDestroy(handle) else Pair(null, null)
+            notifyInternalStorageChanged(this, phoneId)
             if (handle != 0L && bootCard.isNotBlank()) notifyMemoryStickChanged(this, File(bootCard).name)
-            interruptedInbox?.let {
-                PhoneInbox.release(it)
-                notifyPhoneStorageChanged(this, phoneId)
-            }
+            interruptedInbox?.let(PhoneInbox::release)
             runOnUiThread {
                 stopPending = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -593,7 +592,6 @@ class EmulatorActivity : AppCompatActivity() {
         if (foreground) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
         fileExecutor.execute {
             PhoneInbox.release(item)
-            notifyPhoneStorageChanged(this, phoneId)
         }
     }
 

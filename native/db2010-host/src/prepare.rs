@@ -199,15 +199,48 @@ pub fn prepare_locked_at(main:&Path, fs_image:&Path, workspace:&Path) -> Result<
     prepare_in(main,fs_image,|_| Ok(workspace.to_owned()))
 }
 
+/// Reserve a phone before handing startup to the background worker.
+/// The lease also excludes offline access to its saved internal memory.
+pub struct LockedWorkspace {
+    directory: PathBuf,
+    lease: fs::File,
+}
+
+impl LockedWorkspace {
+    fn open(directory: PathBuf, wait: bool) -> Result<Self> {
+        fs::create_dir_all(&directory)?;
+        let lease = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
+            .open(directory.join("session.lock"))?;
+        if wait {
+            lease.lock().context("Waiting for the previous native phone session")?;
+        } else {
+            lease.try_lock().context("The phone or its internal memory is already in use")?;
+        }
+        Ok(Self { directory, lease })
+    }
+
+    pub fn try_open(directory: PathBuf) -> Result<Self> {
+        Self::open(directory, false)
+    }
+
+    pub fn prepare(self, main: &Path, fs_image: &Path) -> Result<Prepared> {
+        let mut archive = ZipArchive::new(Cursor::new(BUNDLE))?;
+        let manifest = serde_json::from_slice(&member(&mut archive, "manifest.json")?)?;
+        prepare_reserved(main, fs_image, archive, manifest, self)
+    }
+}
+
 fn prepare_in(main:&Path, fs_image:&Path, locate:impl FnOnce(&Manifest) -> Result<PathBuf>) -> Result<Prepared> {
     let mut archive=ZipArchive::new(Cursor::new(BUNDLE))?;
     let manifest:Manifest=serde_json::from_slice(&member(&mut archive,"manifest.json")?)?;
+    let locked = LockedWorkspace::open(locate(&manifest)?, true)?;
+    prepare_reserved(main, fs_image, archive, manifest, locked)
+}
+
+fn prepare_reserved(main:&Path, fs_image:&Path, mut archive:ZipArchive<Cursor<&[u8]>>,
+    manifest:Manifest, locked:LockedWorkspace) -> Result<Prepared> {
+    let LockedWorkspace { directory: workspace, lease } = locked;
     let (main_records,nor_fs)=provision(main,fs_image,&manifest)?;
-    let workspace=locate(&manifest)?;
-    fs::create_dir_all(&workspace)?;
-    let lease=fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
-        .open(workspace.join("session.lock"))?;
-    lease.lock().context("Waiting for the previous native phone session")?;
     let mut state:Value=serde_json::from_slice(&member(&mut archive,"state-template.json")?)?;
     let mut seeds=Vec::new();
     for (index,(address,bytes)) in main_records.into_iter().enumerate() {

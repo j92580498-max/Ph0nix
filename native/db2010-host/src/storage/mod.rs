@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Live phone file operations and portable removable FAT images.
 pub mod card;
+pub mod internal;
 pub mod obex;
 pub use card::{CardImage, CardInfo};
 

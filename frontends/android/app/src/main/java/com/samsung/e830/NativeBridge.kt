@@ -38,6 +38,9 @@ internal object NativeBridge {
     external fun nativeBluetoothReceiverTake(handle: Long): String
     external fun nativeBluetoothReceiverClose(handle: Long)
     external fun nativeCardRequest(request: String): String
+    external fun nativeInternalFileRequest(
+        selection: String, dataDirectory: String, workspace: String, request: String,
+    ): String
     external fun nativeIsRunning(handle: Long): Boolean
     external fun nativeSetPaused(handle: Long, paused: Boolean)
     external fun nativeStop(handle: Long): String
