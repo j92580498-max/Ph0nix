@@ -447,7 +447,7 @@ fn main() -> Result<()> {
             },
         )?;
         ensure!(
-            fs::read(output)? == fs::read(source)?,
+            fs::read(output)? == fs::read(&source)?,
             "Export contents after restart differ"
         );
         if offline {
