@@ -14,7 +14,6 @@ import org.json.JSONObject
 internal class PhoneFilePanel(
     private val context: Context,
     private val request: (JSONObject) -> Unit,
-    private val import: (List<String>, Boolean) -> Unit,
     private val export: (List<String>, Boolean) -> Unit,
     private val bluetoothSend: (List<String>) -> Unit,
     private val title: String = "Phone files",
@@ -34,10 +33,6 @@ internal class PhoneFilePanel(
         val buttons = LinearLayout(context)
         buttons.addView(button("Up") { if (path.isNotEmpty()) list(path.dropLast(1)) }, weighted())
         buttons.addView(button("Refresh") { list(path) }, weighted())
-        buttons.addView(button("Import…") {
-            MaterialAlertDialogBuilder(context).setTitle("Import into /${path.joinToString("/")}")
-                .setItems(arrayOf("Copy file", "Move file")) { _, choice -> import(path, choice == 1) }.show()
-        }, weighted())
         layout.addView(pathText)
         layout.addView(buttons)
         layout.addView(ScrollView(context).apply { addView(rows) },

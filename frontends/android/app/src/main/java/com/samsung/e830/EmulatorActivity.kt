@@ -9,7 +9,6 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.os.SystemClock
-import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -84,9 +83,6 @@ class EmulatorActivity : AppCompatActivity() {
     private var nextInboxCheck = 0L
     private var checkingInbox = false
     private val failedInboxFiles = mutableSetOf<String>()
-    private var importDestination = emptyList<String>()
-    private var moveImportedDocument = false
-    private var importCardImage: String? = null
     private var documentExport: File? = null
     private var documentExportTemporary = true
     private var exportPhoneSource = emptyList<String>()
@@ -109,8 +105,8 @@ class EmulatorActivity : AppCompatActivity() {
     private val discoverable = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         if (it.resultCode > 0) runCatching { bluetooth.receive() }.onFailure { showBluetoothMessage(it.message.orEmpty()) }
     }
-    private val importDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) importPhoneDocument(uri, importDestination, moveImportedDocument, importCardImage)
+    private val importBluetoothDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) importBluetoothFile(uri)
     }
     private val importCardDocument = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) fileExecutor.execute {
@@ -184,9 +180,6 @@ class EmulatorActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         preferences = AppPreferences(this)
         savedInstanceState?.let { saved ->
-            importDestination = saved.getStringArrayList("import_destination").orEmpty()
-            moveImportedDocument = saved.getBoolean("move_import_document")
-            importCardImage = saved.getString("import_card_image")
             documentExport = saved.getString("document_export")?.let(::File)
             documentExportTemporary = saved.getBoolean("document_export_temporary", true)
             exportPhoneSource = saved.getStringArrayList("export_phone_source").orEmpty()
@@ -312,9 +305,6 @@ class EmulatorActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("fullscreen", fullscreen)
-        outState.putStringArrayList("import_destination", ArrayList(importDestination))
-        outState.putBoolean("move_import_document", moveImportedDocument)
-        outState.putString("import_card_image", importCardImage)
         outState.putString("document_export", documentExport?.absolutePath)
         outState.putBoolean("document_export_temporary", documentExportTemporary)
         outState.putStringArrayList("export_phone_source", ArrayList(exportPhoneSource))
@@ -547,11 +537,12 @@ class EmulatorActivity : AppCompatActivity() {
     private fun showFileBrowser() {
         releaseKeys()
         if (filePanel?.isShowing == true) return
-        filePanel = PhoneFilePanel(this, { enqueueFile(it) }, { destination, move ->
-            importDestination = destination; moveImportedDocument = move; importCardImage = null
-            importDocument.launch(arrayOf("*/*"))
-        }, { source, move -> stagePhoneExport(source, move, false) },
-            { source -> stagePhoneExport(source, false, true) }).also { it.show() }
+        filePanel = PhoneFilePanel(
+            this,
+            request = { enqueueFile(it) },
+            export = { source, move -> stagePhoneExport(source, move, false) },
+            bluetoothSend = { source -> stagePhoneExport(source, false, true) },
+        ).also { it.show() }
     }
 
     private fun enqueueFile(request: JSONObject, completed: ((JSONObject) -> Unit)? = null): Boolean {
@@ -666,11 +657,11 @@ class EmulatorActivity : AppCompatActivity() {
         checkAndroidInbox()
     }
 
-    private fun importPhoneDocument(uri: Uri, destination: List<String>, move: Boolean, card: String? = null) {
+    private fun importBluetoothFile(uri: Uri) {
         fileExecutor.execute {
+            val destination = listOf("Phone memory", "Other")
             var staging: File? = null
             var name = "imported-file"
-            var expected = ByteArray(0)
             val result = runCatching {
                 val displayName = contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
                     if (cursor.moveToFirst()) cursor.getString(0) else null
@@ -680,22 +671,12 @@ class EmulatorActivity : AppCompatActivity() {
                 val target = File(filesDir, "transfer-staging/${UUID.randomUUID()}/$name")
                 staging = target; target.parentFile!!.mkdirs()
                 contentResolver.openInputStream(uri)!!.use { input -> target.outputStream().use { copyLimited(input, it, 32L * 1024L * 1024L) } }
-                if (move) expected = target.inputStream().use(::streamDigest)
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) { staging?.delete(); return@runOnUiThread }
                 result.onSuccess {
-                    val accepted = dispatchFile(card, JSONObject().put("operation", "import").put("path", JSONArray(destination + name))
-                        .put("host", staging!!.absolutePath).put("replace", false).put("move_source", true)) {
-                        if (move) fileExecutor.execute {
-                            val result = runCatching {
-                                val current = contentResolver.openInputStream(uri)!!.use(::streamDigest)
-                                check(expected.contentEquals(current)) { "Source changed during the transfer. The original was kept." }
-                                check(DocumentsContract.deleteDocument(contentResolver, uri)) { "The document provider could not remove the original." }
-                            }
-                            result.onFailure { error -> runOnUiThread { if (!isDestroyed) filePanel?.message("Imported. ${error.message}") } }
-                        }
-                    }
+                    val accepted = enqueueFile(JSONObject().put("operation", "import").put("path", JSONArray(destination + name))
+                        .put("host", staging!!.absolutePath).put("replace", false).put("move_source", true))
                     if (!accepted) staging?.delete()
                 }.onFailure { staging?.delete(); filePanel?.message("Import failed: ${it.message}") }
             }
@@ -778,11 +759,13 @@ class EmulatorActivity : AppCompatActivity() {
     private fun showCardFiles(image: String) {
         selectedCardImage = image
         cardPanel?.dismiss()
-        cardPanel = PhoneFilePanel(this, { requestCard(image, it) }, { destination, move ->
-            importDestination = destination; moveImportedDocument = move; importCardImage = image
-            importDocument.launch(arrayOf("*/*"))
-        }, { source, move -> stagePhoneExport(source, move, false, image) },
-            { source -> stagePhoneExport(source, false, true, image) }, "Card image files").also { it.show() }
+        cardPanel = PhoneFilePanel(
+            this,
+            request = { requestCard(image, it) },
+            export = { source, move -> stagePhoneExport(source, move, false, image) },
+            bluetoothSend = { source -> stagePhoneExport(source, false, true, image) },
+            title = "Card image files",
+        ).also { it.show() }
     }
 
     private fun requestCard(image: String, request: JSONObject, completed: ((JSONObject) -> Unit)? = null): Boolean {
@@ -853,10 +836,7 @@ class EmulatorActivity : AppCompatActivity() {
                             .putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 120))
                     }
                     2 -> showBluetoothInbox()
-                    3 -> {
-                        importDestination = listOf("Phone memory", "Other"); importCardImage = null; moveImportedDocument = false
-                        importDocument.launch(arrayOf("*/*"))
-                    }
+                    3 -> importBluetoothDocument.launch(arrayOf("*/*"))
                     4 -> bluetooth.cancel()
                 } }
             })
