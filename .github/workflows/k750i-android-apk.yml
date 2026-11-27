@@ -2,7 +2,7 @@ name: K750i Android APK
 on:
   workflow_call:
   push:
-    branches: [test/k750i-internal-storage]
+    branches: [test/k750i-internal-storage, test/k750i-android-apk]
     paths:
       - '.github/workflows/k750i-android-apk.yml'
       - 'frontends/android/**'

@@ -318,7 +318,7 @@ class MainActivity : AppCompatActivity() {
             setBusy(false)
             result.fold(
                 onSuccess = { entry ->
-                    if (entry.device == "k750i") notifyPhoneStorageChanged(this)
+                    if (entry.device == "k750i") notifyPhoneStorageChanged(this@MainActivity)
                     status.text = getString(R.string.import_success, entry.name)
                     refreshLibrary()
                 },
@@ -586,7 +586,7 @@ class MainActivity : AppCompatActivity() {
             setBusy(false)
             result.onSuccess {
                 refreshLibrary()
-                notifyPhoneStorageChanged(this)
+                notifyPhoneStorageChanged(this@MainActivity)
                 showMessage(getString(R.string.phone_renamed, name))
             }.onFailure { error ->
                 showMessage(error.message ?: getString(R.string.rename_phone_failed))
@@ -614,7 +614,7 @@ class MainActivity : AppCompatActivity() {
                 onSuccess = {
                     if (entry.device == "k750i") {
                         preferences.rememberPhoneCard(entry.id, null)
-                        notifyPhoneStorageChanged(this)
+                        notifyPhoneStorageChanged(this@MainActivity)
                     }
                     status.setText(R.string.source_files_untouched)
                     refreshLibrary()
