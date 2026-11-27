@@ -68,26 +68,27 @@ jobs:
             python3 -m db2010.development.source init
           fi
           python3 -m venv build/android/host-tools
-          wheel=meson-1.11.1-py3-none-any.whl
-          wheel_path=packages/5e/cd/f3a881ff5e601d6bbeff63b38ee2362e1167c47d9cde03eddf8d71a4ffb0/$wheel
-          wheel_sha256=9b3a023657e393dbc5335b95c561337d49b7a458f5541e47ec44f2cc566e0d80
           tools_tmp="$(mktemp -d "$RUNNER_TEMP/ph0nix-tools.XXXXXXXX")"
           trap 'rm -rf -- "$tools_tmp"' EXIT
-          verified=0
-          for source in https://files.pythonhosted.org \
-            https://mirrors.huaweicloud.com/repository/pypi \
-            https://mirrors.aliyun.com/pypi https://mirrors.cloud.tencent.com/pypi; do
-            if curl -fsSL --connect-timeout 7 --max-time 30 --output "$tools_tmp/$wheel" "$source/$wheel_path" &&
-              printf '%s  %s\n' "$wheel_sha256" "$tools_tmp/$wheel" | sha256sum --check; then
-              verified=1
-              break
-            fi
-          done
-          if [ "$verified" -ne 1 ]; then
-            echo 'Could not download the verified Meson wheel.' >&2
-            exit 1
-          fi
-          build/android/host-tools/bin/python -m pip install --no-index --no-deps "$tools_tmp/$wheel"
+          download_wheel() {
+            local path="$1" sha256="$2" source destination="$tools_tmp/${1##*/}"
+            for source in https://files.pythonhosted.org \
+              https://mirrors.huaweicloud.com/repository/pypi \
+              https://mirrors.aliyun.com/pypi https://mirrors.cloud.tencent.com/pypi; do
+              if curl -fsSL --connect-timeout 7 --max-time 30 --output "$destination" "$source/$path" &&
+                printf '%s  %s\n' "$sha256" "$destination" | sha256sum --check; then
+                return 0
+              fi
+            done
+            echo "Could not download the verified wheel: ${path##*/}" >&2
+            return 1
+          }
+          download_wheel packages/a3/dc/17031897dae0efacfea57dfd3a82fdd2a2aeb58e0ff71b77b87e44edc772/setuptools-80.9.0-py3-none-any.whl \
+            062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922
+          download_wheel packages/0b/2c/87f3254fd8ffd29e4c02732eee68a83a1d3c346ae39bc6822dcbcb697f2b/wheel-0.45.1-py3-none-any.whl \
+            708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248
+          build/android/host-tools/bin/python -m pip install --no-index --no-deps qemu/python/wheels/*.whl "$tools_tmp"/*.whl
+          echo 'PIP_NO_INDEX=1' >> "$GITHUB_ENV"
           echo "$GITHUB_WORKSPACE/build/android/host-tools/bin" >> "$GITHUB_PATH"
           echo "FEATUREPHONE_PYTHON=$GITHUB_WORKSPACE/build/android/host-tools/bin/python" >> "$GITHUB_ENV"
           ndk="$ANDROID_HOME/ndk/29.0.14206865"
