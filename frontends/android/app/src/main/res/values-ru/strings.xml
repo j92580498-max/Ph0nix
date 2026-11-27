@@ -8,11 +8,6 @@
     <string name="card_documents_empty">Карт пока нет. Создайте или импортируйте карту в меню запуска K750i в ph0nix.</string>
     <string name="card_documents_missing">Этот образ карты больше недоступен. Вернитесь назад и выберите другую карту.</string>
     <string name="card_documents_copy_summary">Файлы копируются прямо на карту. При следующем запуске выберите ту же карту.</string>
-    <string name="phone_inbox_title">Внутренняя память (Other)</string>
-    <string name="phone_inbox_files_only">Во внутреннюю память можно копировать только файлы. Откройте исходную папку и выберите файлы внутри.</string>
-    <string name="phone_inbox_saved">Сохранено в Other: %1$s</string>
-    <string name="phone_inbox_failed">Не удалось импортировать %1$s. Копия осталась в «Файлах» Android. %2$s</string>
-    <string name="phone_inbox_retry">Повторить импорт из Android</string>
     <string name="library_title">ph0nix</string>
     <string name="library_subtitle">Библиотека прошивок</string>
     <string name="empty_title">Нет добавленных прошивок</string>

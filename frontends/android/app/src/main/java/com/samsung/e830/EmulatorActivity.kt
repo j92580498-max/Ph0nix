@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.os.SystemClock
 import android.provider.OpenableColumns
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -80,9 +79,6 @@ class EmulatorActivity : AppCompatActivity() {
     private var activeFile: PendingFile? = null
     private var activeFileId = 0L
     private var lastFileErrorId = 0L
-    private var nextInboxCheck = 0L
-    private var checkingInbox = false
-    private val failedInboxFiles = mutableSetOf<String>()
     private var documentExport: File? = null
     private var documentExportTemporary = true
     private var exportPhoneSource = emptyList<String>()
@@ -171,9 +167,6 @@ class EmulatorActivity : AppCompatActivity() {
     }
     private val selection by lazy { intent.getStringExtra(EXTRA_SELECTION).orEmpty() }
     private val phoneId by lazy { intent.getStringExtra(EXTRA_PHONE_ID)?.takeIf { StorageDocument.validId(it) } }
-    private val inboxDirectory by lazy {
-        intent.getStringExtra(EXTRA_PHONE_DIRECTORY)?.let { PhoneInbox.directory(File(it)) }
-    }
     private val bootCard by lazy { intent.getStringExtra(EXTRA_CARD_IMAGE).orEmpty() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -226,18 +219,12 @@ class EmulatorActivity : AppCompatActivity() {
         toolbar.menu.add(0, MENU_BLUETOOTH, 1, "Bluetooth files")
         toolbar.menu.add(0, MENU_CARDS, 2, "Card images")
         toolbar.menu.add(0, MENU_DEVELOPER, 3, "Developer")
-        if (device == "k750i" && phoneId != null) toolbar.menu.add(0, MENU_ANDROID_INBOX, 4, R.string.phone_inbox_retry)
         toolbar.setOnMenuItemClickListener { item ->
             when (item.itemId) {
                 MENU_FILES -> showFileBrowser()
                 MENU_BLUETOOTH -> showBluetooth()
                 MENU_CARDS -> showCards()
                 MENU_DEVELOPER -> openDiagnostics()
-                MENU_ANDROID_INBOX -> {
-                    failedInboxFiles.clear()
-                    nextInboxCheck = 0L
-                    checkAndroidInbox()
-                }
                 else -> return@setOnMenuItemClickListener false
             }
             true
@@ -465,7 +452,6 @@ class EmulatorActivity : AppCompatActivity() {
         lcd.setRunning(false)
         lcd.onPresentationFrame = null
         waiting.visibility = View.GONE
-        val interruptedInbox = activeFile?.inbox
         activeFile?.let {
             filePanel?.message("Transfer interrupted while the phone was stopped. Retry after it resumes.")
             activeFile = null; activeFileId = 0L
@@ -477,7 +463,6 @@ class EmulatorActivity : AppCompatActivity() {
             val (error, report) = if (handle != 0L) stopAndDestroy(handle) else Pair(null, null)
             notifyInternalStorageChanged(this, phoneId)
             if (handle != 0L && bootCard.isNotBlank()) notifyMemoryStickChanged(this, File(bootCard).name)
-            interruptedInbox?.let(PhoneInbox::release)
             runOnUiThread {
                 stopPending = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -555,46 +540,6 @@ class EmulatorActivity : AppCompatActivity() {
         return true
     }
 
-    private fun checkAndroidInbox() {
-        val directory = inboxDirectory ?: return
-        if (phoneId == null || sessionHandle.get() == 0L || !foreground || sessionStopped ||
-            checkingInbox || activeFile != null ||
-            pendingFiles.isNotEmpty() || !latestFiles.optBoolean("attached") || latestFiles.optBoolean("busy") ||
-            !(latestFiles.optBoolean("serial_ready") || latestFiles.optBoolean("connected"))) return
-        val now = SystemClock.elapsedRealtime()
-        if (now < nextInboxCheck) return
-        nextInboxCheck = now + 2000
-        checkingInbox = true
-        val skip = failedInboxFiles.toSet()
-        fileExecutor.execute {
-            val item = PhoneInbox.claim(directory, skip)
-            runOnUiThread {
-                checkingInbox = false
-                if (item == null) return@runOnUiThread
-                if (!foreground || sessionStopped || sessionHandle.get() == 0L || isFinishing || isDestroyed ||
-                    activeFile != null || pendingFiles.isNotEmpty() || latestFiles.optBoolean("busy") || !latestFiles.optBoolean("attached")) {
-                    PhoneInbox.release(item)
-                    return@runOnUiThread
-                }
-                val request = JSONObject().put("operation", "import_internal")
-                    .put("name", item.name).put("host", item.ready.absolutePath)
-                pendingFiles.addLast(PendingFile(request, null, item))
-                drainFiles()
-            }
-        }
-    }
-
-    private fun inboxFinished(item: PhoneInbox.Item, error: String?) {
-        if (error != null) failedInboxFiles.add(item.id)
-        val message = if (error == null) getString(R.string.phone_inbox_saved, item.name)
-            else getString(R.string.phone_inbox_failed, item.name, error)
-        filePanel?.message(message)
-        if (foreground) Toast.makeText(this, message, Toast.LENGTH_LONG).show()
-        fileExecutor.execute {
-            PhoneInbox.release(item)
-        }
-    }
-
     private fun drainFiles() {
         if (!foreground || sessionStopped || activeFile != null || pendingFiles.isEmpty() ||
             !latestFiles.optBoolean("attached") || latestFiles.optBoolean("busy")) return
@@ -616,8 +561,7 @@ class EmulatorActivity : AppCompatActivity() {
                 if (activeFile !== action) return@runOnUiThread
                 result.onSuccess { activeFileId = it }.onFailure { error ->
                     activeFile = null
-                    val message = error.message.orEmpty()
-                    if (action.inbox != null) inboxFinished(action.inbox, message) else filePanel?.message(message)
+                    filePanel?.message(error.message.orEmpty())
                 }
             }
         }
@@ -631,13 +575,10 @@ class EmulatorActivity : AppCompatActivity() {
             val action = activeFile
             activeFile = null; activeFileId = 0L
             val succeeded = job.optString("phase") == "complete" && job.isNull("error")
-            action?.inbox?.let { item ->
-                inboxFinished(item, if (succeeded) null else job.optString("error").takeUnless { job.isNull("error") }.orEmpty())
-            }
             if (succeeded) {
                 action?.completed?.invoke(job)
                 if (filePanel?.isShowing == true && action?.request?.optString("operation") in
-                    setOf("import", "import_internal", "copy", "delete", "delete_verified", "make_directory")) {
+                    setOf("import", "copy", "delete", "delete_verified", "make_directory")) {
                     enqueueFile(JSONObject().put("operation", "list").put("path", JSONArray(filePanel!!.currentPath())))
                 }
             }
@@ -652,7 +593,6 @@ class EmulatorActivity : AppCompatActivity() {
             }
         }
         drainFiles()
-        checkAndroidInbox()
     }
 
     private fun importBluetoothFile(uri: Uri) {
@@ -882,7 +822,6 @@ class EmulatorActivity : AppCompatActivity() {
     private data class PendingFile(
         val request: JSONObject,
         val completed: ((JSONObject) -> Unit)?,
-        val inbox: PhoneInbox.Item? = null,
     )
 
     private fun stopAndDestroy(handle: Long): Pair<String?, JSONObject?> {
@@ -998,7 +937,6 @@ class EmulatorActivity : AppCompatActivity() {
     private data class Binding(val label: String, val mask: Int)
     companion object {
         const val EXTRA_PHONE_ID = "com.samsung.e830.PHONE_ID"
-        const val EXTRA_PHONE_DIRECTORY = "com.samsung.e830.PHONE_DIRECTORY"
         const val EXTRA_SELECTION = "com.samsung.e830.SELECTION"
         const val EXTRA_MEMORY_WORKSPACE = "com.samsung.e830.MEMORY_WORKSPACE"
         const val EXTRA_CARD_IMAGE = "com.samsung.e830.CARD_IMAGE"
@@ -1006,6 +944,5 @@ class EmulatorActivity : AppCompatActivity() {
         private const val MENU_BLUETOOTH = 2
         private const val MENU_CARDS = 3
         private const val MENU_DEVELOPER = 4
-        private const val MENU_ANDROID_INBOX = 5
     }
 }

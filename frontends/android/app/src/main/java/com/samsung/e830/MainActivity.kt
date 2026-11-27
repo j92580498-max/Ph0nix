@@ -543,7 +543,6 @@ class MainActivity : AppCompatActivity() {
             Intent(this, EmulatorActivity::class.java)
                 .putExtra(EmulatorActivity.EXTRA_SELECTION, entry.selectionJson())
                 .putExtra(EmulatorActivity.EXTRA_PHONE_ID, entry.id)
-                .putExtra(EmulatorActivity.EXTRA_PHONE_DIRECTORY, entry.directory.absolutePath)
                 .putExtra(EmulatorActivity.EXTRA_MEMORY_WORKSPACE, entry.memoryWorkspace?.absolutePath)
                 .putExtra(EmulatorActivity.EXTRA_CARD_IMAGE, card?.absolutePath),
         )

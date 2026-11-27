@@ -8,11 +8,6 @@
     <string name="card_documents_empty">No card images yet. Create or import one from the K750i launch menu in ph0nix.</string>
     <string name="card_documents_missing">This Memory Stick image is no longer available. Go back and choose another card.</string>
     <string name="card_documents_copy_summary">Files are copied directly to the card. Use the same card next time you start the phone.</string>
-    <string name="phone_inbox_title">Internal storage (Other)</string>
-    <string name="phone_inbox_files_only">Internal storage accepts individual files only. Open the source folder and select the files inside.</string>
-    <string name="phone_inbox_saved">Saved to Phone memory/Other: %1$s</string>
-    <string name="phone_inbox_failed">Could not import %1$s. The copy is still in Android Files. %2$s</string>
-    <string name="phone_inbox_retry">Retry files from Android</string>
     <string name="library_title">ph0nix</string>
     <string name="library_subtitle">Firmware library</string>
     <string name="empty_title">No firmware imported</string>

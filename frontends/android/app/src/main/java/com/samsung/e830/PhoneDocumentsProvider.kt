@@ -489,12 +489,10 @@ internal class DocumentWriteCallback(
     private val signal: CancellationSignal?,
     private val commit: () -> Unit,
     private val cleanup: () -> Unit,
-    private val sealAfterSync: Boolean = false,
 ) : ProxyFileDescriptorCallback() {
     private val file = RandomAccessFile(staging, "rw")
     private var dirty = truncate
     private var failed = false
-    private var sealed = false
 
     override fun onGetSize(): Long = io("size") { file.length() }
 
@@ -504,7 +502,6 @@ internal class DocumentWriteCallback(
     }
 
     override fun onWrite(offset: Long, size: Int, data: ByteArray): Int {
-        if (sealed) throw ErrnoException("Document already saved", OsConstants.EPERM)
         if (offset < 0 || size < 0 || offset > MAX_BYTES - size) {
             failed = true
             throw ErrnoException("File exceeds 32 MiB", OsConstants.EFBIG)
@@ -519,16 +516,14 @@ internal class DocumentWriteCallback(
 
     override fun onFsync() = io("sync") {
         if (dirty) {
-            if (sealAfterSync) file.fd.sync()
             commit()
-            sealed = sealAfterSync
             dirty = false
         }
     }
 
     override fun onRelease() {
         try {
-            if (!sealAfterSync && dirty && !failed && signal?.isCanceled != true) onFsync()
+            if (dirty && !failed && signal?.isCanceled != true) onFsync()
         } catch (error: ErrnoException) {
             Log.w("ph0nix", "Could not save a document on close", error)
         } finally {
