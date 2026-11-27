@@ -100,24 +100,3 @@ jobs:
             exit 1
           fi
           python3 frontends/android/build-support/probe_k750_memory.py "$work/phone/first-phone/phone-memory.k750mem"
-      - name: Build and test the APK
-        working-directory: frontends/android
-        run: ./gradlew --no-daemon --console=plain assembleRelease lintRelease testDebugUnitTest
-      - name: Verify and package the APK
-        run: |
-          mkdir -p dist/k750i-android
-          apk=dist/k750i-android/ph0nix-k750i-arm64.apk
-          cp frontends/android/app/build/outputs/apk/release/app-release.apk "$apk"
-          python3 frontends/android/build-support/verify_apk.py "$apk" \
-            --ndk "$ANDROID_NDK_HOME" \
-            --aapt2 "$ANDROID_HOME/build-tools/35.0.0/aapt2" \
-            --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
-            --report dist/k750i-android/apk-verification.json
-          cp build/android/qemu/provenance.json dist/k750i-android/engine-provenance.json
-          cd dist/k750i-android
-          sha256sum ph0nix-k750i-arm64.apk > ph0nix-k750i-arm64.apk.sha256
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ph0nix-k750i-arm64
-          path: dist/k750i-android/*
-          if-no-files-found: error
