@@ -92,7 +92,7 @@ def main():
         if libraries != ['lib/arm64-v8a/libdb2010_engine.so', 'lib/arm64-v8a/libe830_android_jni.so']:
             raise RuntimeError('Unexpected native libraries or Android ABIs')
         dex = b''.join(archive.read(name) for name in archive.namelist() if re.fullmatch(r'classes\d*\.dex', name))
-        for name in ('MainActivity', 'EmulatorActivity', 'DeveloperPanel', 'PhoneFilePanel', 'BluetoothBridge'):
+        for name in ('MainActivity', 'EmulatorActivity', 'DeveloperPanel', 'PhoneDocumentsProvider', 'BluetoothBridge'):
             if f'Lcom/samsung/e830/{name};'.encode() not in dex:
                 raise RuntimeError(f'Missing packaged Android class: {name}')
         for member in libraries:
