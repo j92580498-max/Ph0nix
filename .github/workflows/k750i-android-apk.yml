@@ -99,7 +99,7 @@ jobs:
             find "$work/phone" -type f -name engine.log -exec tail -n 60 {} \; || true
             exit 1
           fi
-          python3 frontends/android/build-support/probe_k750_memory.py "$work/phone/first-phone/exported.k750mem"
+          python3 frontends/android/build-support/probe_k750_memory.py "$work/phone/first-phone/phone-memory.k750mem"
       - name: Build and test the APK
         working-directory: frontends/android
         run: ./gradlew --no-daemon --console=plain assembleRelease lintRelease testDebugUnitTest
