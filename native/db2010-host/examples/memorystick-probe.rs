@@ -183,18 +183,8 @@ fn main() -> Result<()> {
     // A connected card has its own state and must survive a normal stop
     // even when the launcher is configured to resume the phone session.
     list(&mut session, &folder).context("Listing card files after the firmware import")?;
-    session.files.quiesce(Duration::from_secs(20)).context("Disconnecting OBEX after the card write")?;
-    println!("Card after OBEX disconnect: {}", probe(&mut session)?);
-    // Check whether the firmware writes its cached directory and FAT after
-    // the transfer session ends and before the host stops the CPU.
-    let idle = Duration::from_secs(30);
-    let until = Instant::now() + idle;
-    while Instant::now() < until {
-        require_running(&mut session)?;
-        thread::sleep(Duration::from_millis(250));
-    }
-    println!("Card after {idle:?} of idle time: {}", probe(&mut session)?);
     session.save_with_resume(options.resume).context("Saving the first card session")?;
+    println!("Card after saving: {}", probe(&mut session)?);
     drop(session);
 
     let root = card.list(&[]).context("Opening the raw card after stopping the engine")?;

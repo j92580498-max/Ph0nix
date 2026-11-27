@@ -525,6 +525,24 @@ impl Session {
         self.diagnostics.log("info","storage","Internal memory saved after the PMIC stop; the next launch will cold boot.");
         Ok(true)
     }
+    fn allow_card_writeback(&mut self) -> Result<()> {
+        // R1DB001 can acknowledge an OBEX PUT while file data and FAT
+        // metadata are still cached. Keep firmware running after DISCONNECT.
+        const GUEST_NS: u64 = 30_000_000_000;
+        let mut start = None;
+        let deadline = Instant::now() + Duration::from_secs(90);
+        self.diagnostics.log("info", "storage", "Waiting for Memory Stick writes to finish.");
+        loop {
+            let progress = self.progress()?;
+            ensure!(progress["running"] == true, "Firmware stopped while saving the Memory Stick: {}",
+                self.summary()?["stop"]);
+            let now = progress["virtual_ns"].as_u64().context("Missing firmware clock")?;
+            if now.saturating_sub(*start.get_or_insert(now)) >= GUEST_NS { return Ok(()); }
+            ensure!(Instant::now() < deadline, "Firmware did not run long enough to finish saving the Memory Stick");
+            thread::sleep(Duration::from_millis(250));
+        }
+    }
+
     fn save_phone(&mut self, resume:bool) -> Result<()> {
         // An OBEX session is host state, not checkpoint state. Finish its
         // queued operation and return firmware to AT mode while the VM can
@@ -532,6 +550,7 @@ impl Session {
         self.files.quiesce(Duration::from_secs(20))
             .context("Disconnecting phone file service before checkpoint")?;
         self.contacts(&[])?;
+        if self.card_inserted { self.allow_card_writeback()?; }
         self.qmp.execute("stop",json!({}))?;
         ensure!(self.summary()?["stop"].is_null(),
             "Firmware stopped with an error; the previous saved phone state was kept");

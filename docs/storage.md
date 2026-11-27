@@ -48,7 +48,7 @@ It writes `ph0nix-transfer-test.txt`, exports it into the prepared-state directo
 
 ### Experimental K750i Memory Stick PRO Duo
 
-On desktop, open **Card images**, create or open a FAT16 `.img`, and select **Use for the next K750i boot**. On Android, choose a card image when starting a K750i from the library, or select **Create a card and start…** and pick a size from 16 MiB to 1 GiB. The engine attaches the image before the CPU starts, so the firmware can detect it during boot. Stop the phone before changing the image or editing it from the host. To reuse a card after a cold boot, select the same `.img`. A normal stop with a card inserted saves internal storage without a VM checkpoint.
+On desktop, open **Card images**, create or open a FAT16 `.img`, and select **Use for the next K750i boot**. On Android, choose a card image when starting a K750i from the library, or select **Create a card and start…** and pick a size from 16 MiB to 1 GiB. The engine attaches the image before the CPU starts, so the firmware can detect it during boot. Stop the phone before changing the image or editing it from the host. To reuse a card after a cold boot, select the same `.img`. With a card inserted, a normal stop gives the firmware 30 seconds of emulated time to finish card writes, then saves internal storage without a VM checkpoint. Wait for the app to finish saving before reopening or editing the image.
 
 On a running phone, open **Phone files → Memory Stick**, open the destination folder, and select **Import… → Copy file** to pick a file in Android's system file picker. The Memory Stick image is kept separately from the phone's internal storage; it does not appear as a second Android drive.
 

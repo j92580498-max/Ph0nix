@@ -431,7 +431,8 @@ class EmulatorActivity : AppCompatActivity() {
         }
         leaving = true
         if (fullscreen) setFullscreen(false)
-        status.text = "Saving phone memory?"
+        status.text = if (bootCard.isBlank()) "Saving phone memory…"
+            else "Saving the Memory Stick and phone memory. This can take about 30 seconds."
         stopSession()
     }
 
