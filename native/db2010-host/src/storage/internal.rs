@@ -8,7 +8,7 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use std::{
     fmt, fs,
-    io::{self, Cursor},
+    io,
     path::{Path, PathBuf},
 };
 
@@ -65,7 +65,7 @@ pub fn request(workspace: &Path, request: Request) -> Result<Value> {
     let path = parts.join("/");
     let flash = flash::unpack_memory(workspace, &memory)?;
     let mut volume = Volume::open(flash.path())?;
-    let disk = FileSystem::new(Cursor::new(volume.bytes_mut()), FsOptions::new())
+    let disk = FileSystem::new(volume.disk(), FsOptions::new())
         .context("Opening K750i internal FAT volume")?;
     ensure!(disk.fat_type() == FatType::Fat16, "Unsupported K750i internal FAT volume");
     let mut entries = Vec::new();

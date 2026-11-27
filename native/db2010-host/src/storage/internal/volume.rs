@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! R1DB001's first FAT16 volume spans committed NOR slots and NAND page pairs.
 use anyhow::{ensure, Context, Result};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    io::{self, Cursor, Read, Seek, SeekFrom, Write},
+    path::Path,
+};
 
 const NOR_SPAN: usize = 0x40000;
 const NOR_SLOT: usize = 1028;
@@ -11,7 +15,6 @@ const SPARE: usize = 16;
 const PAGES: usize = 65536;
 const BASE: usize = 11;
 const TOTAL: usize = 81262;
-const FAT_SECTORS: usize = 159;
 const METADATA_PAIRS: usize = 96;
 const FIRST_DATA_PAIR: usize = METADATA_PAIRS;
 
@@ -27,6 +30,7 @@ pub(super) struct Volume {
     spare: Vec<u8>,
     slots: Vec<Option<Slot>>,
     free: Vec<usize>,
+    unavailable: Vec<bool>,
     bytes: Vec<u8>,
 }
 
@@ -80,7 +84,7 @@ impl Volume {
         }
         ensure!(!seeded && live_nand, "Start K750i once, finish setup, and return to the library before opening Internal memory.");
         let mut bytes = vec![0; TOTAL * SECTOR];
-        let mut volume = Self { nor, main, spare, slots, free, bytes: Vec::new() };
+        let mut volume = Self { nor, main, spare, slots, free, unavailable: Vec::new(), bytes: Vec::new() };
         for (i, destination) in bytes.chunks_exact_mut(PAIR).enumerate() {
             if let Some(source) = volume.get(i) { destination.copy_from_slice(source); }
         }
@@ -90,12 +94,12 @@ impl Volume {
             && bytes[32..36] == (TOTAL as u32).to_le_bytes()
             && bytes[510..512] == [0x55, 0xaa], "Unsupported K750i internal FAT geometry");
         ensure!(volume.slots[..METADATA_PAIRS].iter().all(Option::is_some), "Missing K750i filesystem metadata");
-        let fat = &bytes[SECTOR..(1 + FAT_SECTORS) * SECTOR];
-        for (i, slot) in volume.slots[FIRST_DATA_PAIR..].iter().enumerate() {
-            let entry = (i + 2) * 2;
-            let cluster = u16::from_le_bytes(fat[entry..entry + 2].try_into().unwrap());
-            ensure!(cluster == 0 || cluster == 0xfff7 || slot.is_some(), "Missing K750i data for an allocated FAT cluster");
-        }
+        // The firmware can leave allocated FAT clusters without any live FTL
+        // slot outside the user tree. Preserve those entries and reject I/O
+        // if a file or directory actually needs one of the missing clusters.
+        volume.unavailable = volume.slots.iter().enumerate().map(|(i, slot)| {
+            slot.is_none() && allocated(&bytes, i)
+        }).collect();
         volume.bytes = bytes;
         Ok(volume)
     }
@@ -107,7 +111,9 @@ impl Volume {
         }
     }
 
-    pub(super) fn bytes_mut(&mut self) -> &mut [u8] { &mut self.bytes }
+    pub(super) fn disk(&mut self) -> Disk<'_> {
+        Disk { cursor: Cursor::new(self.bytes.as_mut_slice()), unavailable: &self.unavailable }
+    }
 
     pub(super) fn save(mut self, path: &Path) -> Result<()> {
         let mut free = std::mem::take(&mut self.free).into_iter();
@@ -115,11 +121,11 @@ impl Volume {
         let mut nand_changed = false;
         for i in 0..self.slots.len() {
             let data = &self.bytes[i * PAIR..(i + 1) * PAIR];
-            let allocated = if i >= FIRST_DATA_PAIR {
-                let entry = SECTOR + (i - FIRST_DATA_PAIR + 2) * 2;
-                !matches!(u16::from_le_bytes(self.bytes[entry..entry + 2].try_into().unwrap()), 0 | 0xfff7)
-            } else { true };
-            if self.get(i).map_or(!allocated, |old| old == data) { continue; }
+            if self.unavailable[i]
+                || self.get(i).map_or_else(|| !allocated(&self.bytes, i), |old| old == data)
+            {
+                continue;
+            }
             match self.slots[i] {
                 Some(Slot::Nor(off)) => {
                     self.nor[off..off + PAIR].copy_from_slice(data);
@@ -152,6 +158,52 @@ impl Volume {
         }
         Ok(())
     }
+}
+
+fn allocated(bytes: &[u8], pair: usize) -> bool {
+    if pair < FIRST_DATA_PAIR { return true; }
+    let entry = SECTOR + (pair - FIRST_DATA_PAIR + 2) * 2;
+    !matches!(u16::from_le_bytes(bytes[entry..entry + 2].try_into().unwrap()), 0 | 0xfff7)
+}
+
+pub(super) struct Disk<'a> {
+    cursor: Cursor<&'a mut [u8]>,
+    unavailable: &'a [bool],
+}
+
+impl Disk<'_> {
+    fn check(&self, count: usize) -> io::Result<()> {
+        let position = self.cursor.position().min(self.cursor.get_ref().len() as u64) as usize;
+        let end = position.saturating_add(count).min(self.cursor.get_ref().len());
+        if position < end {
+            let first = position / PAIR;
+            let last = (end - 1) / PAIR;
+            if let Some(offset) = self.unavailable[first..=last].iter().position(|missing| *missing) {
+                return Err(io::Error::new(io::ErrorKind::InvalidData,
+                    format!("Missing K750i flash data for logical block {}", BASE + first + offset)));
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Read for Disk<'_> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        self.check(output.len())?;
+        self.cursor.read(output)
+    }
+}
+
+impl Write for Disk<'_> {
+    fn write(&mut self, input: &[u8]) -> io::Result<usize> {
+        self.check(input.len())?;
+        self.cursor.write(input)
+    }
+    fn flush(&mut self) -> io::Result<()> { self.cursor.flush() }
+}
+
+impl Seek for Disk<'_> {
+    fn seek(&mut self, position: SeekFrom) -> io::Result<u64> { self.cursor.seek(position) }
 }
 
 fn record(slots: &mut [Option<Slot>], tag: u32, slot: Slot) -> Result<bool> {
