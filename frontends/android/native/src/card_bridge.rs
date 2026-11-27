@@ -51,6 +51,9 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCardRequest<'loc
             result.map_err(|e| format!("{e:#}"))?;
         }
         if !include_snapshot {
+            if operation == "info" {
+                return Ok(json!({"info":card.info().map_err(|e| format!("{e:#}"))?}));
+            }
             return Ok(json!({}));
         }
         let entries = card.list(&path).map_err(|e| format!("{e:#}"))?;

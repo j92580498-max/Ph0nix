@@ -6,7 +6,7 @@ On a normal stop, K750i saves internal flash in `phone-memory.k750mem`, even whe
 
 In Android, every new K750i entry gets its own `phone-memory.k750mem` when MAIN and FS are imported. Adding the same pair again creates a fresh phone. Existing entries keep their saved data in their original location.
 
-In Android, open **Library**, open the K750i entry's **⋮** menu and choose **Export internal memory…** to save the file. **Import internal memory…** verifies the complete file before replacing the selected phone's saved storage. The next launch starts with the imported flash and fresh CPU state, even if resume is enabled. A corrupt or incomplete backup is rejected before the current memory file is replaced. The matching K750i MAIN/FS pair is still required to prepare the phone for boot.
+In Android, open **Library**, open the K750i entry's **⋮** menu and choose **Export internal memory…**. Save the file to Android Downloads or another folder outside the emulated phone. The app prepares and verifies the backup before opening the save picker, then reopens the saved copy and compares it to the source. If the copy fails, it asks the document provider to remove the unfinished file. **Import internal memory…** verifies the complete file before replacing the selected phone's saved storage. The next launch starts with the imported flash and fresh CPU state, even if resume is enabled. A corrupt or incomplete backup is rejected before the current memory file is replaced. The matching K750i MAIN/FS pair is still required to prepare the phone for boot.
 
 With resume enabled, the VM checkpoint is kept separately. Its metadata refers to a specific flash generation so an older checkpoint cannot resume over newer memory. With resume disabled, automatic saves and live imported moves write the flash file without creating a checkpoint.
 
@@ -53,11 +53,17 @@ On desktop, open **Card images**, create or open a FAT16 `.img`, and select **Us
 On Android 8.0 or later, open **Files → ph0nix → [phone name]**. To copy a file into a phone, start from the source file and choose **Copy to… → ph0nix → [phone name]**, then open the exact destination folder and tap **Copy**. The limit is 32 MiB per file, subject to the free space on the destination.
 
 - **Internal memory** shows the K750i user folders. Return to the ph0nix library and wait for the phone to finish saving before opening them. The phone still holds its memory while paused or in the background. Files go to the chosen folder directly; you can see them on the next boot.
-- **Memory Stick (memory card)** lists card images by name and size. Cards are shared across K750i machines. Create or import a card from the launch menu if the list is empty. Stop the phone using a card and wait for it to finish saving before editing the card from Files. Start the phone with the same card to see the files.
+- **Memory Stick (memory card)** lists card images by name and size. Files also shows total, used and free space from FAT allocation; the launch picker shows the nominal image size. Cards are shared across K750i machines. Create or import a card from the launch menu if the list is empty. Stop the phone using a card and wait for it to finish saving before editing the card from Files. Start the phone with the same card to see the files.
 
 If your file manager does not show ph0nix, use Android's system Files app.
 
 Firmware compatibility is checked by the `K750i Memory Stick storage` workflow on CT100. It exercises the stock R1DB001 firmware, including file listing, writeback to the raw image, and reopening the file after a cold boot.
+
+### Measuring Back to library
+
+Capture `adb logcat -s Ph0nixSave:I` on the same Android device for four cases: no card with Resume off, no card with Resume on, an idle inserted card, and exit immediately after a write to an inserted card. Compare `save_total` and the individual save phases with `library_pre_draw`. The `storage_notifications_complete` line measures provider notification, not a successful Files read. Separately open Files and copy a known file out to check its bytes, then copy another file in and verify it after a cold boot. A run where storage notifications already completed before Back is not a fresh stop measurement.
+
+For a disposable card workspace on a Linux host, run `cargo run --locked -p db2010-host --example memorystick-probe -- ENGINE WORKSPACE MAIN FS 32`. Repeat with a new workspace and `64`. Append `idle` to save without a guest write. The write case saves as soon as the firmware import completes and checks the bytes in both the stopped raw image and the cold-booted firmware. These host probes do not measure Android latency.
 
 ## Controller evidence for further implementation
 

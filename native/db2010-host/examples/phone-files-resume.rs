@@ -244,13 +244,25 @@ fn memory_generation(workspace: &Path) -> Result<[u8; 24]> {
     Ok(header)
 }
 
+fn save_and_report(session: &mut Session, resume: bool, phase: &str) -> Result<()> {
+    let previous = session.diagnostics.snapshot().uptime_seconds * 1000.0;
+    let saved = session.save_with_resume(resume);
+    println!("Internal memory save: phase={phase} resume={resume}");
+    for entry in session.diagnostics.snapshot().logs {
+        if entry.component == "save-timing" && entry.timestamp_ms >= previous as u64 {
+            println!("{}", entry.message);
+        }
+    }
+    saved
+}
+
 fn main() -> Result<()> {
     let mut args = std::env::args_os().skip(1);
     let engine = PathBuf::from(args.next().context(
-        "Usage: phone-files-resume ENGINE COPIED_STATE CHECKPOINT [cold-boot] | ENGINE --fresh DATA_DIR MAIN FS",
+        "Usage: phone-files-resume ENGINE COPIED_STATE CHECKPOINT [cold-boot] | ENGINE (--fresh|--fresh-resume) DATA_DIR MAIN FS",
     )?);
     let input = args.next().context("Copied prepared state or --fresh required")?;
-    let (state, checkpoint, cold_boot, fresh) = if input == "--fresh" {
+    let (state, checkpoint, cold_boot, fresh) = if input == "--fresh" || input == "--fresh-resume" {
         let data = PathBuf::from(args.next().context("New data directory required")?);
         let main = PathBuf::from(args.next().context("K750i MAIN required")?);
         let fs_image = PathBuf::from(args.next().context("K750i FS required")?);
@@ -267,7 +279,7 @@ fn main() -> Result<()> {
         ensure!(prepare::create_internal_memory(&main, &fs_image, &first).is_err(),
             "Creating a phone over an existing workspace succeeded");
         let state = prepare::prepare_locked_at(&main, &fs_image, &first)?.state;
-        (state, None, true, Some((second, second_initial, main, fs_image)))
+        (state, None, input == "--fresh", Some((second, second_initial, main, fs_image)))
     } else {
         let checkpoint = PathBuf::from(args.next().context("Starting checkpoint required")?);
         let cold_boot = match args.next() {
@@ -291,6 +303,7 @@ fn main() -> Result<()> {
     )?;
     let inbox = std::env::var_os("PH0NIX_TEST_ANDROID_INBOX").is_some();
     let offline = std::env::var_os("PH0NIX_TEST_ANDROID_OFFLINE").is_some();
+    ensure!(!offline || cold_boot, "The offline memory test requires a cold boot");
     let staged = workspace.join("ph0nix-resume-test.txt");
     if inbox {
         ensure!(fresh.is_some(), "The Android inbox test requires a fresh phone");
@@ -361,7 +374,7 @@ fn main() -> Result<()> {
             serde_json::json!({"phase":"before_save","files":session.files.snapshot()})
         );
         // Deliberately leave the file service connected; Session owns safe quiescence.
-        session.save_with_resume(!cold_boot)?;
+        save_and_report(&mut session, !cold_boot, "after_import")?;
         if fresh.is_some() { assert_internal_locked(&workspace)?; }
     }
     if offline {
@@ -467,7 +480,7 @@ fn main() -> Result<()> {
             "{}",
             serde_json::json!({"phase":"after_restart","files":session.files.snapshot()})
         );
-        session.save_with_resume(!cold_boot)?;
+        save_and_report(&mut session, !cold_boot, "after_restart")?;
         if cold_boot && checkpoint.is_none() {
             assert_no_checkpoint(&workspace)?;
         }

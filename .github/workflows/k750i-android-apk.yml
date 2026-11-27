@@ -111,6 +111,7 @@ jobs:
             --ndk "$ANDROID_NDK_HOME" \
             --aapt2 "$ANDROID_HOME/build-tools/35.0.0/aapt2" \
             --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
+            --expected-certificate-sha256 6afca99ee47fb55c27316d9c7f38f36a1ad7a19779505c49217c51c5758dc012 \
             --report dist/k750i-android/apk-verification.json
           cp build/android/qemu/provenance.json dist/k750i-android/engine-provenance.json
           cd dist/k750i-android

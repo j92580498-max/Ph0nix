@@ -8,6 +8,7 @@
     <string name="card_documents_empty">Карт пока нет. Создайте или импортируйте карту в меню запуска K750i в ph0nix.</string>
     <string name="card_documents_missing">Этот образ карты больше недоступен. Вернитесь назад и выберите другую карту.</string>
     <string name="card_documents_copy_summary">Файлы копируются прямо на карту. При следующем запуске выберите ту же карту.</string>
+    <string name="card_capacity_summary">Всего %1$s · занято %2$s · свободно %3$s</string>
     <string name="library_title">ph0nix</string>
     <string name="library_subtitle">Библиотека прошивок</string>
     <string name="empty_title">Нет добавленных прошивок</string>
@@ -68,6 +69,7 @@
     <string name="k750_memory_exported">Файл внутренней памяти K750i сохранён.</string>
     <string name="k750_memory_missing_entry">Этот K750i удалён из библиотеки.</string>
     <string name="k750_memory_open_failed">Не удалось открыть выбранный файл.</string>
+    <string name="export_outside_phone">Сохраните копию в «Загрузки» Android или другую папку вне ph0nix.</string>
     <string name="k750_memory_too_large">Файл слишком большой для резервной копии памяти K750i.</string>
     <string name="k750_memory_failed">Не удалось скопировать память K750i: %1$s</string>
     <string name="logo_description">Кнопочный телефон ph0nix</string>

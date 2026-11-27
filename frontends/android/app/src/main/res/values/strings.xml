@@ -8,6 +8,7 @@
     <string name="card_documents_empty">No card images yet. Create or import one from the K750i launch menu in ph0nix.</string>
     <string name="card_documents_missing">This Memory Stick image is no longer available. Go back and choose another card.</string>
     <string name="card_documents_copy_summary">Files are copied directly to the card. Use the same card next time you start the phone.</string>
+    <string name="card_capacity_summary">%1$s total · %2$s used · %3$s free</string>
     <string name="library_title">ph0nix</string>
     <string name="library_subtitle">Firmware library</string>
     <string name="empty_title">No firmware imported</string>
@@ -68,6 +69,7 @@
     <string name="k750_memory_exported">K750i internal memory file saved.</string>
     <string name="k750_memory_missing_entry">This K750i entry no longer exists.</string>
     <string name="k750_memory_open_failed">Could not open the selected file.</string>
+    <string name="export_outside_phone">Save the backup in Android Downloads or another folder outside ph0nix.</string>
     <string name="k750_memory_too_large">The file is too large to be a K750i memory backup.</string>
     <string name="k750_memory_failed">K750i memory transfer failed: %1$s</string>
     <string name="phone_internal_title">Internal memory</string>

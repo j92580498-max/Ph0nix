@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Committed K750i flash for cold boots; legacy checkpoint images and portable backups.
 use anyhow::{ensure, Context, Result};
+use crate::diagnostics::DiagnosticsHandle;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -200,10 +201,15 @@ impl PendingMemory {
         Ok((Self { path, generation }, file))
     }
 
-    pub(crate) fn pack(workspace: &Path, directory: &Path) -> Result<Self> {
+    pub(crate) fn pack(workspace: &Path, directory: &Path, diagnostics: Option<&DiagnosticsHandle>) -> Result<Self> {
         let (pending, mut output) = Self::create(workspace)?;
-        pack_flash_directory(directory, &mut output, pending.generation)?;
-        output.sync_all()?;
+        if let Some(diagnostics) = diagnostics {
+            diagnostics.measure_save("memory_pack", || pack_flash_directory(directory, &mut output, pending.generation))?;
+            diagnostics.measure_save("memory_sync", || output.sync_all())?;
+        } else {
+            pack_flash_directory(directory, &mut output, pending.generation)?;
+            output.sync_all()?;
+        }
         Ok(pending)
     }
 

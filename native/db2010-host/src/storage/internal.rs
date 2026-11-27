@@ -143,7 +143,7 @@ pub fn request(workspace: &Path, request: Request) -> Result<Value> {
     }
     if writes {
         volume.save(flash.path())?;
-        let pending = PendingMemory::pack(workspace, flash.path())?;
+        let pending = PendingMemory::pack(workspace, flash.path(), None)?;
         let generation = format!("{:032x}", pending.generation());
         pending.publish(workspace)?;
         remove_old_checkpoint(workspace);

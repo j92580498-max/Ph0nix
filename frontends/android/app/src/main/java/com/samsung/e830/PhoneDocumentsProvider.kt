@@ -63,7 +63,8 @@ class PhoneDocumentsProvider : DocumentsProvider() {
                 doc.isInternal -> addDocument(doc, phone, entry(doc))
                 doc.isCardRoot -> {
                     val image = image(doc)
-                    addDocument(doc, phone, card = image, cardIssue = cardIssue(doc, image))
+                    val (summary, issue) = cardDetails(doc, image)
+                    addDocument(doc, phone, card = image, cardSummary = summary, cardIssue = issue)
                 }
                 else -> addDocument(doc, phone, if (doc.isCardFile) entry(doc) else null)
             }
@@ -92,14 +93,19 @@ class PhoneDocumentsProvider : DocumentsProvider() {
                     } else R.string.card_documents_choose_card))
                     images.forEach { image ->
                         val card = parent.child(image.name)
-                        addDocument(card, phone, card = image, cardIssue = cardIssue(card, image))
+                        val (summary, issue) = cardDetails(card, image)
+                        addDocument(card, phone, card = image, cardSummary = summary, cardIssue = issue)
                     }
                 }
                 parent.isCard || parent.isInternal -> try {
-                    val entries = list(parent)
+                    val response = request(parent, "list")
                     if (parent.isCardRoot) {
-                        setExtras(message(DocumentsContract.EXTRA_INFO, R.string.card_documents_copy_summary))
+                        setExtras(Bundle().apply {
+                            val capacity = MemoryStickImages.capacitySummary(app, response.getJSONObject("info"))
+                            putString(DocumentsContract.EXTRA_INFO, "$capacity\n${app.getString(R.string.card_documents_copy_summary)}")
+                        })
                     }
+                    val entries = response.getJSONObject("snapshot").getJSONArray("entries")
                     for (index in 0 until entries.length()) {
                         val child = entries.getJSONObject(index)
                         addDocument(parent.child(child.getString("name")), phone, child)
@@ -309,11 +315,11 @@ class PhoneDocumentsProvider : DocumentsProvider() {
         error.message ?: app.getString(R.string.phone_internal_power_off)
     }
 
-    private fun cardIssue(document: StorageDocument, image: File): String? = try {
-        request(document, "info", snapshot = false, card = image)
-        null
+    private fun cardDetails(document: StorageDocument, image: File): Pair<String?, String?> = try {
+        val info = request(document, "info", snapshot = false, card = image).getJSONObject("info")
+        MemoryStickImages.capacitySummary(app, info) to null
     } catch (error: IOException) {
-        error.message ?: app.getString(R.string.card_documents_missing)
+        null to (error.message ?: app.getString(R.string.card_documents_missing))
     }
 
     private fun message(key: String, text: Int) = Bundle().apply { putString(key, app.getString(text)) }
@@ -334,7 +340,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
 
     private fun MatrixCursor.addDocument(
         document: StorageDocument, phone: FirmwareEntry?, entry: JSONObject? = null,
-        card: File? = null, cardIssue: String? = null, storageIssue: String? = null,
+        card: File? = null, cardSummary: String? = null, cardIssue: String? = null, storageIssue: String? = null,
     ) {
         val directory = entry?.getBoolean("directory") ?: true
         addRow(values(columnNames) { column ->
@@ -350,7 +356,7 @@ class PhoneDocumentsProvider : DocumentsProvider() {
                 }
                 Document.COLUMN_SUMMARY -> when {
                     document.isCardList -> app.getString(R.string.card_documents_choose_card)
-                    document.isCardRoot -> cardIssue ?: app.getString(R.string.card_documents_copy_summary)
+                    document.isCardRoot -> cardIssue ?: cardSummary
                     document.isInternalRoot -> storageIssue ?: app.getString(R.string.phone_internal_power_off)
                     else -> null
                 }

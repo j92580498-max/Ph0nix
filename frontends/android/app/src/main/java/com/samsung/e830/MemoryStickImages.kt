@@ -1,5 +1,8 @@
 package com.samsung.e830
 
+import android.content.Context
+import android.text.format.Formatter
+import org.json.JSONObject
 import java.io.File
 
 /** The same image names are used in Android Files and the K750i boot picker. */
@@ -25,4 +28,11 @@ internal object MemoryStickImages {
         val name = if (generated == null) image.name else "${generated.groupValues[1]}-${generated.groupValues[2]}"
         return "$name (${image.length() / 1048576} MiB)"
     }
+
+    fun capacitySummary(context: Context, info: JSONObject): String = context.getString(
+        R.string.card_capacity_summary,
+        Formatter.formatShortFileSize(context, info.getLong("capacity_bytes")),
+        Formatter.formatShortFileSize(context, info.getLong("used_bytes")),
+        Formatter.formatShortFileSize(context, info.getLong("free_bytes")),
+    )
 }

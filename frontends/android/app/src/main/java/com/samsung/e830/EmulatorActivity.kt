@@ -7,7 +7,9 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.OpenableColumns
+import android.util.Log
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
@@ -64,6 +66,7 @@ class EmulatorActivity : AppCompatActivity() {
     private var sessionStopped = false
     private var stopPending = false
     private var leaving = false
+    private var leaveStartedAt = 0L
     private var lastDiagnostics: JSONObject? = null
     private var fullscreen = false
     private var bindings = emptyList<Binding>()
@@ -125,10 +128,9 @@ class EmulatorActivity : AppCompatActivity() {
     private val exportDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         val image = documentExport
         documentExport = null
-        if (uri != null && image != null) fileExecutor.execute {
+        if (uri != null) fileExecutor.execute {
             val result = runCatching {
-                val output = contentResolver.openOutputStream(uri, "wt") ?: error("Could not open the export destination.")
-                output.use { target -> image.inputStream().use { it.copyTo(target, 32768) } }
+                writeDocumentExport(uri, image)
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -389,8 +391,9 @@ class EmulatorActivity : AppCompatActivity() {
 
     private fun leaveEmulator() {
         if (leaving) return
+        leaveStartedAt = SystemClock.elapsedRealtime()
         if (sessionStopped && !stopPending) {
-            finish()
+            finishToLibrary()
             return
         }
         leaving = true
@@ -418,6 +421,7 @@ class EmulatorActivity : AppCompatActivity() {
             val (error, report) = if (handle != 0L) stopAndDestroy(handle) else Pair(null, null)
             notifyInternalStorageChanged(this, phoneId)
             if (handle != 0L && bootCard.isNotBlank()) notifyMemoryStickChanged(this, File(bootCard).name)
+            val notificationsCompletedAt = SystemClock.elapsedRealtime()
             runOnUiThread {
                 stopPending = false
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -433,9 +437,23 @@ class EmulatorActivity : AppCompatActivity() {
                             .show()
                     }
                     leaving = false
-                } else if (leaving) finish()
+                } else if (leaving) {
+                    if (handle != 0L) {
+                        if (notificationsCompletedAt >= leaveStartedAt) {
+                            Log.i(SAVE_TIMING_TAG, "storage_notifications_complete elapsed_ms=${notificationsCompletedAt - leaveStartedAt}")
+                        } else {
+                            Log.i(SAVE_TIMING_TAG, "storage_notifications_already_complete")
+                        }
+                    }
+                    finishToLibrary()
+                }
             }
         }
+    }
+
+    private fun finishToLibrary() {
+        setResult(RESULT_OK, Intent().putExtra(EXTRA_LEAVE_STARTED_AT, leaveStartedAt))
+        finish()
     }
 
     private fun openDiagnostics() {
@@ -609,8 +627,12 @@ class EmulatorActivity : AppCompatActivity() {
         MaterialAlertDialogBuilder(this).setTitle(image.name)
             .setMessage("FAT16 image · ${image.length() / 1048576} MiB. Choose this image from the library when starting K750i.")
             .setNeutralButton("Export image…") { _, _ ->
-                documentExport = image
-                exportDocument.launch(image.name)
+                if (image.isFile && image.length() > 0) {
+                    documentExport = image
+                    exportDocument.launch(image.name)
+                } else {
+                    Toast.makeText(this, "The card image is missing or empty.", Toast.LENGTH_LONG).show()
+                }
             }.setNegativeButton("Close", null).show()
     }
 
@@ -718,6 +740,14 @@ class EmulatorActivity : AppCompatActivity() {
         }
         // Stop joins the worker, including any memory save. Capture the final report first.
         val diagnostic = runCatching { JSONObject(NativeBridge.nativeDiagnostics(handle)) }.getOrNull()
+        diagnostic?.optJSONArray("logs")?.let { logs ->
+            for (index in 0 until logs.length()) {
+                val entry = logs.optJSONObject(index) ?: continue
+                if (entry.optString("component") == "save-timing") {
+                    Log.i(SAVE_TIMING_TAG, entry.optString("message"))
+                }
+            }
+        }
         NativeBridge.nativeDestroy(handle)
         return Pair(error, diagnostic)
     }
@@ -822,6 +852,8 @@ class EmulatorActivity : AppCompatActivity() {
         const val EXTRA_SELECTION = "com.samsung.e830.SELECTION"
         const val EXTRA_MEMORY_WORKSPACE = "com.samsung.e830.MEMORY_WORKSPACE"
         const val EXTRA_CARD_IMAGE = "com.samsung.e830.CARD_IMAGE"
+        internal const val EXTRA_LEAVE_STARTED_AT = "com.samsung.e830.LEAVE_STARTED_AT"
+        internal const val SAVE_TIMING_TAG = "Ph0nixSave"
         private const val MENU_BLUETOOTH = 2
         private const val MENU_CARDS = 3
         private const val MENU_DEVELOPER = 4

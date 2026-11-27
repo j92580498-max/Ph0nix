@@ -144,17 +144,22 @@ fn export(session: &mut Session, path: Vec<String>, host: PathBuf, expected: &[u
 }
 
 fn main() -> Result<()> {
-    let [engine, workspace, main, fs_image]: [PathBuf; 4] = std::env::args_os()
-        .skip(1)
-        .map(PathBuf::from)
-        .collect::<Vec<_>>()
-        .try_into()
-        .ok()
-        .context("Usage: memorystick-probe ENGINE WORKSPACE MAIN FS")?;
+    let mut args = std::env::args_os().skip(1);
+    let [engine, workspace, main, fs_image]: [PathBuf; 4] = args.by_ref().take(4)
+        .map(PathBuf::from).collect::<Vec<_>>().try_into().ok()
+        .context("Usage: memorystick-probe ENGINE WORKSPACE MAIN FS [SIZE_MIB [idle]]")?;
+    let size = args.next().map(|size| size.to_str().context("Invalid card size")?
+        .parse::<u64>().context("Invalid card size")).transpose()?.unwrap_or(32);
+    let idle = match args.next() {
+        None => false,
+        Some(mode) if mode == "idle" => true,
+        Some(_) => bail!("Expected idle, or omit the mode to write a file before saving"),
+    };
+    ensure!(args.next().is_none(), "Unexpected arguments");
     fs::create_dir_all(&workspace)?;
     let workspace = workspace.canonicalize()?;
     let options = HostOptions { engine, data_dir: workspace.clone(), resume: true };
-    let card = CardImage::create(&workspace.join("card.img"), 32)?;
+    let card = CardImage::create(&workspace.join("card.img"), size)?;
     let seed = b"This file was placed on the card before boot.\r\n".repeat(140);
     let written = b"This file was written by the K750i firmware.\r\n".repeat(240);
     let seed_host = workspace.join("seed-input.txt");
@@ -174,27 +179,35 @@ fn main() -> Result<()> {
         }
     };
     export(&mut session, [folder.clone(), vec![SEED.into()]].concat(), workspace.join("readback.txt"), &seed)?;
-    let path = [folder.clone(), vec![WRITTEN.into()]].concat();
-    let before = probe(&mut session)?["sectors_written"].as_u64().context("Missing card write counter")?;
-    request(&mut session, FileRequest::Import { path: path.clone(), host: write_host, replace: false, move_source: false })?;
-    let status = probe(&mut session)?;
-    ensure!(status["sectors_written"].as_u64().unwrap_or(0) > before, "No sector writes through the card controller since import (was {before}): {status}");
-    println!("After firmware write: {status}");
-    // A connected card has its own state and must survive a normal stop
-    // even when the launcher is configured to resume the phone session.
-    list(&mut session, &folder).context("Listing card files after the firmware import")?;
-    session.save_with_resume(options.resume).context("Saving the first card session")?;
-    println!("Card after saving: {}", probe(&mut session)?);
+    let before = probe(&mut session)?;
+    let (name, expected) = if idle { (SEED, &seed) } else { (WRITTEN, &written) };
+    let path = [folder.clone(), vec![name.into()]].concat();
+    if !idle {
+        request(&mut session, FileRequest::Import { path: path.clone(), host: write_host, replace: false, move_source: false })?;
+    }
+    let saved = session.save_with_resume(options.resume);
+    println!("Memory Stick save: size_mib={size} idle={idle}");
+    for entry in session.diagnostics.snapshot().logs {
+        if entry.component == "save-timing" { println!("{}", entry.message); }
+    }
+    saved.context("Saving the first card session")?;
+    let after = probe(&mut session)?;
+    println!("Card before the tested operation: {before}; after saving: {after}");
+    if !idle {
+        ensure!(after["sectors_written"].as_u64().context("Missing final card write counter")?
+            > before["sectors_written"].as_u64().context("Missing initial card write counter")?,
+            "No sector writes through the card controller during import and save");
+    }
     drop(session);
 
     let root = card.list(&[]).context("Opening the raw card after stopping the engine")?;
     println!("Raw card root after stopping the engine: {}", serde_json::to_string(&root)?);
     let raw_readback = workspace.join("image-readback.txt");
     let raw_result = (|| -> Result<()> {
-        card.export_file(&[WRITTEN.into()], &raw_readback, false)
-            .context("Extracting the imported file from the raw FAT16 root")?;
-        ensure!(fs::read(raw_readback).context("Reading the extracted file")? == written,
-            "Firmware write did not persist in the card image");
+        card.export_file(&[name.into()], &raw_readback, false)
+            .context("Extracting the file from the raw FAT16 root")?;
+        ensure!(&fs::read(raw_readback).context("Reading the extracted file")? == expected,
+            "File bytes differ in the saved card image");
         Ok(())
     })();
     if let Err(error) = &raw_result {
@@ -210,9 +223,9 @@ fn main() -> Result<()> {
         .context("Preparing a cold boot with the saved internal memory")?;
     let mut session = boot(&options, prepared, &card, false)?;
     list(&mut session, &folder).context("Listing card files after the cold boot")?;
-    export(&mut session, path, workspace.join("cold-readback.txt"), &written)
-        .context("Reading the imported file through firmware after the cold boot")?;
+    export(&mut session, path, workspace.join("cold-readback.txt"), expected)
+        .context("Reading the file through firmware after the cold boot")?;
     raw_result?;
-    println!("Memory Stick read, write and cold-boot persistence passed");
+    println!("Memory Stick raw and cold-boot readback passed (idle={idle})");
     Ok(())
 }

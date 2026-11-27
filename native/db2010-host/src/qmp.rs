@@ -491,7 +491,11 @@ impl Session {
     pub fn save(&mut self) -> Result<()> { self.save_with_resume(true) }
 
     pub fn save_with_resume(&mut self, resume:bool) -> Result<()> {
+        let start=Instant::now();
+        let checkpoint=self.will_save_checkpoint(resume);
         let result=self.save_phone(resume).and_then(|()|self.files.commit_saved());
+        self.diagnostics.record_save_phase(&format!("save_total card={} resume={resume} checkpoint={checkpoint}",
+            self.card_inserted),start.elapsed(),result.is_ok());
         if let Err(error)=&result {
             self.files.fail_pending_commit(&format!("{error:#}"));
             self.diagnostics.log("error","storage",format!("Phone save failed: {error:#}"));
@@ -547,16 +551,19 @@ impl Session {
         // An OBEX session is host state, not checkpoint state. Finish its
         // queued operation and return firmware to AT mode while the VM can
         // still acknowledge the disconnect; ambiguous streams cannot save.
-        self.files.quiesce(Duration::from_secs(20))
+        let diagnostics=self.diagnostics.clone();
+        diagnostics.measure_save("files_quiesce", || self.files.quiesce(Duration::from_secs(20)))
             .context("Disconnecting phone file service before checkpoint")?;
         self.contacts(&[])?;
-        if self.card_inserted { self.allow_card_writeback()?; }
+        if self.card_inserted {
+            diagnostics.measure_save("card_writeback", || self.allow_card_writeback())?;
+        }
         self.qmp.execute("stop",json!({}))?;
         ensure!(self.summary()?["stop"].is_null(),
             "Firmware stopped with an error; the previous saved phone state was kept");
         let memory=self.pack_internal_memory()?;
         if !self.will_save_checkpoint(resume) {
-            memory.publish(&self.workspace)?;
+            diagnostics.measure_save("memory_publish", || memory.publish(&self.workspace))?;
             remove_old_checkpoint(&self.workspace);
             return Ok(());
         }
@@ -572,16 +579,18 @@ impl Session {
         let previous=read_checkpoint(&metadata).ok();
         let pending=self.workspace.join("phone.saved.json.pending");
         let result=(|| -> Result<()> {
-            self.migrate("migrate",&temporary)?;
-            atomic_replace(&temporary,&final_path)?;
-            fs::OpenOptions::new().write(true).open(&final_path)?.sync_all()?;
-            // A checkpoint is usable only with the matching published memory generation.
-            fs::write(&pending,serde_json::to_vec(&SavedCheckpoint {
-                format_version:1,file:name.clone(),checkpoint_tcm:state["checkpoint_tcm"].clone(),
-                flash:None,memory_generation:Some(memory.generation().to_string()),
-            })?)?;
-            fs::OpenOptions::new().write(true).open(&pending)?.sync_all()?;
-            memory.publish(&self.workspace)?;
+            diagnostics.measure_save("vm_migrate", || self.migrate("migrate",&temporary))?;
+            diagnostics.measure_save("vm_sync", || -> Result<()> {
+                atomic_replace(&temporary,&final_path)?;
+                fs::OpenOptions::new().write(true).open(&final_path)?.sync_all()?;
+                fs::write(&pending,serde_json::to_vec(&SavedCheckpoint {
+                    format_version:1,file:name.clone(),checkpoint_tcm:state["checkpoint_tcm"].clone(),
+                    flash:None,memory_generation:Some(memory.generation().to_string()),
+                })?)?;
+                fs::OpenOptions::new().write(true).open(&pending)?.sync_all()?;
+                Ok(())
+            })?;
+            diagnostics.measure_save("memory_publish", || memory.publish(&self.workspace))?;
             atomic_replace(&pending,&metadata)?;
             Ok(())
         })();
@@ -591,7 +600,8 @@ impl Session {
             let _=fs::remove_file(&pending);
         }
         result?;
-        sync_directory(&self.workspace).context("Synchronizing phone checkpoint directory")?;
+        diagnostics.measure_save("vm_directory_sync", || sync_directory(&self.workspace))
+            .context("Synchronizing phone checkpoint directory")?;
         if let Some(previous)=previous { remove_checkpoint_files(&self.workspace,previous); }
         Ok(())
     }
@@ -599,9 +609,10 @@ impl Session {
         let export=FlashExport::new(&self.workspace)?;
         // Raw images total almost 64 MiB. Allow slower phone storage more
         // time than the normal five-second observation deadline.
-        self.qmp.execute_with_timeout("qom-set",json!({"path":"/machine","property":"flash-byte-export",
-            "value":export.path()}),Duration::from_secs(30)).context("Saving internal K750 storage")?;
-        PendingMemory::pack(&self.workspace,export.path())
+        self.diagnostics.measure_save("flash_export", || self.qmp.execute_with_timeout("qom-set",
+            json!({"path":"/machine","property":"flash-byte-export","value":export.path()}),
+            Duration::from_secs(30))).context("Saving internal K750 storage")?;
+        PendingMemory::pack(&self.workspace,export.path(),Some(&self.diagnostics))
     }
 }
 fn read_checkpoint(metadata:&Path) -> Result<SavedCheckpoint> {

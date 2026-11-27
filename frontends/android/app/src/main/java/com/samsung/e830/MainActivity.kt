@@ -3,7 +3,9 @@ package com.samsung.e830
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
+import android.os.SystemClock
 import android.text.InputFilter
+import android.util.Log
 import android.view.LayoutInflater
 import android.view.Menu
 import android.view.MenuItem
@@ -21,6 +23,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.core.view.doOnPreDraw
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.LinearLayoutManager
@@ -35,7 +38,9 @@ import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -48,6 +53,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var importButton: FloatingActionButton
     private var pendingNandEntryId: String? = null
     private var pendingMemoryEntryId: String? = null
+    private var pendingMemoryExport: File? = null
     private var pendingCardEntryId: String? = null
     private var importDevice = "k750i"
     private var busy = false
@@ -55,6 +61,15 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tabs: TabLayout
     private var entries = emptyList<FirmwareEntry>()
     private var query = ""
+
+    private val runEmulator = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode != RESULT_OK) return@registerForActivityResult
+        val start = result.data?.getLongExtra(EmulatorActivity.EXTRA_LEAVE_STARTED_AT, -1) ?: -1
+        if (start < 0) return@registerForActivityResult
+        window.decorView.doOnPreDraw {
+            Log.i(EmulatorActivity.SAVE_TIMING_TAG, "library_pre_draw elapsed_ms=${SystemClock.elapsedRealtime() - start}")
+        }
+    }
 
     private val importFirmware = registerForActivityResult(
         ActivityResultContracts.OpenMultipleDocuments(),
@@ -72,11 +87,11 @@ class MainActivity : AppCompatActivity() {
 
     private val exportMemoryDocument = registerForActivityResult(
         ActivityResultContracts.CreateDocument("application/octet-stream"),
-    ) { uri -> finishMemorySelection(uri, importing = false) }
+    ) { uri -> finishMemoryExport(uri) }
 
     private val importMemoryDocument = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
-    ) { uri -> finishMemorySelection(uri, importing = true) }
+    ) { uri -> finishMemoryImport(uri) }
 
     private val importBootCard = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val id = pendingCardEntryId
@@ -89,6 +104,7 @@ class MainActivity : AppCompatActivity() {
         preferences = AppPreferences(this)
         pendingNandEntryId = savedInstanceState?.getString(STATE_NAND_ENTRY)
         pendingMemoryEntryId = savedInstanceState?.getString(STATE_MEMORY_ENTRY)
+        pendingMemoryExport = savedInstanceState?.getString(STATE_MEMORY_EXPORT)?.let { File(cacheDir, it) }
         pendingCardEntryId = savedInstanceState?.getString(STATE_CARD_ENTRY)
         importDevice = savedInstanceState?.getString(STATE_IMPORT_DEVICE)
             ?.takeIf { DeviceProfiles.find(it) != null } ?: importDevice
@@ -146,6 +162,7 @@ class MainActivity : AppCompatActivity() {
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_NAND_ENTRY, pendingNandEntryId)
         outState.putString(STATE_MEMORY_ENTRY, pendingMemoryEntryId)
+        outState.putString(STATE_MEMORY_EXPORT, pendingMemoryExport?.name)
         outState.putString(STATE_CARD_ENTRY, pendingCardEntryId)
         outState.putString(STATE_IMPORT_DEVICE, importDevice)
         outState.putInt("tab", tabs.selectedTabPosition)
@@ -377,9 +394,52 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun chooseMemoryExport(entry: FirmwareEntry) {
-        if (busy) return
-        pendingMemoryEntryId = entry.id
-        exportMemoryDocument.launch("phone-memory.k750mem")
+        if (busy || pendingMemoryExport != null) return
+        setBusy(true)
+        status.setText(R.string.k750_memory_working)
+        lifecycleScope.launch {
+            val staged = File(cacheDir, "k750-export-${UUID.randomUUID()}.k750mem")
+            try {
+                withContext(Dispatchers.IO) { transferMemory(entry, staged, importing = false) }
+                check(staged.isFile && staged.length() > 0) { getString(R.string.k750_memory_open_failed) }
+                pendingMemoryExport = staged
+                exportMemoryDocument.launch("phone-memory.k750mem")
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                pendingMemoryExport = null
+                reportMemoryFailure(error)
+            } finally {
+                if (pendingMemoryExport != staged) staged.delete()
+                setBusy(false)
+            }
+        }
+    }
+
+    private fun finishMemoryExport(uri: Uri?) {
+        val staged = pendingMemoryExport
+        pendingMemoryExport = null
+        if (uri == null) {
+            staged?.delete()
+            refreshLibrary()
+            return
+        }
+        setBusy(true)
+        status.setText(R.string.k750_memory_working)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO + NonCancellable) {
+                try {
+                    runCatching { writeDocumentExport(uri, staged) }
+                } finally {
+                    staged?.delete()
+                }
+            }
+            setBusy(false)
+            result.fold(
+                onSuccess = { status.setText(R.string.k750_memory_exported) },
+                onFailure = ::reportMemoryFailure,
+            )
+        }
     }
 
     private fun confirmMemoryImport(entry: FirmwareEntry) {
@@ -395,7 +455,7 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun finishMemorySelection(uri: Uri?, importing: Boolean) {
+    private fun finishMemoryImport(uri: Uri?) {
         val entryId = pendingMemoryEntryId
         pendingMemoryEntryId = null
         if (uri == null || entryId == null || busy) return
@@ -408,33 +468,22 @@ class MainActivity : AppCompatActivity() {
                         ?: error(getString(R.string.k750_memory_missing_entry))
                     val staged = File.createTempFile("k750-memory-", ".k750mem", cacheDir)
                     try {
-                        if (importing) {
-                            val source = contentResolver.openInputStream(uri)
-                                ?: error(getString(R.string.k750_memory_open_failed))
-                            source.use { input ->
-                                staged.outputStream().use { output ->
-                                    val buffer = ByteArray(64 * 1024)
-                                    var total = 0L
-                                    while (true) {
-                                        val count = input.read(buffer)
-                                        if (count == -1) break
-                                        total += count
-                                        check(total <= MAX_MEMORY_FILE_BYTES) { getString(R.string.k750_memory_too_large) }
-                                        output.write(buffer, 0, count)
-                                    }
+                        val source = contentResolver.openInputStream(uri)
+                            ?: error(getString(R.string.k750_memory_open_failed))
+                        source.use { input ->
+                            staged.outputStream().use { output ->
+                                val buffer = ByteArray(64 * 1024)
+                                var total = 0L
+                                while (true) {
+                                    val count = input.read(buffer)
+                                    if (count == -1) break
+                                    total += count
+                                    check(total <= MAX_MEMORY_FILE_BYTES) { getString(R.string.k750_memory_too_large) }
+                                    output.write(buffer, 0, count)
                                 }
                             }
                         }
-                        val failure = NativeBridge.nativeTransferInternalMemory(
-                            entry.selectionJson(), File(filesDir, "sessions").absolutePath,
-                            entry.memoryWorkspace?.absolutePath.orEmpty(), staged.absolutePath, importing,
-                        )
-                        check(failure.isEmpty()) { failure }
-                        if (!importing) {
-                            val destination = contentResolver.openOutputStream(uri, "wt")
-                                ?: error(getString(R.string.k750_memory_open_failed))
-                            destination.use { output -> staged.inputStream().use { it.copyTo(output) } }
-                        }
+                        transferMemory(entry, staged, importing = true)
                     } finally {
                         staged.delete()
                     }
@@ -442,16 +491,24 @@ class MainActivity : AppCompatActivity() {
             }
             setBusy(false)
             result.fold(
-                onSuccess = {
-                    status.setText(if (importing) R.string.k750_memory_imported else R.string.k750_memory_exported)
-                },
-                onFailure = { error ->
-                    val message = getString(R.string.k750_memory_failed, error.localizedMessage ?: "")
-                    status.text = message
-                    showMessage(message)
-                },
+                onSuccess = { status.setText(R.string.k750_memory_imported) },
+                onFailure = ::reportMemoryFailure,
             )
         }
+    }
+
+    private fun transferMemory(entry: FirmwareEntry, staged: File, importing: Boolean) {
+        val failure = NativeBridge.nativeTransferInternalMemory(
+            entry.selectionJson(), File(filesDir, "sessions").absolutePath,
+            entry.memoryWorkspace?.absolutePath.orEmpty(), staged.absolutePath, importing,
+        )
+        check(failure.isEmpty()) { failure }
+    }
+
+    private fun reportMemoryFailure(error: Throwable) {
+        val message = getString(R.string.k750_memory_failed, error.localizedMessage ?: "")
+        status.text = message
+        showMessage(message)
     }
 
     private fun runFirmware(entry: FirmwareEntry) {
@@ -539,7 +596,7 @@ class MainActivity : AppCompatActivity() {
         if (entry.device == "k750i" && card != null) {
             preferences.rememberPhoneCard(entry.id, card.name)
         }
-        startActivity(
+        runEmulator.launch(
             Intent(this, EmulatorActivity::class.java)
                 .putExtra(EmulatorActivity.EXTRA_SELECTION, entry.selectionJson())
                 .putExtra(EmulatorActivity.EXTRA_PHONE_ID, entry.id)
@@ -635,6 +692,7 @@ class MainActivity : AppCompatActivity() {
     private companion object {
         const val STATE_NAND_ENTRY = "pendingNandEntryId"
         const val STATE_MEMORY_ENTRY = "pendingMemoryEntryId"
+        const val STATE_MEMORY_EXPORT = "pendingMemoryExport"
         const val STATE_CARD_ENTRY = "pendingCardEntryId"
         const val MAX_MEMORY_FILE_BYTES = 65L * 1024 * 1024
         const val STATE_IMPORT_DEVICE = "importDevice"
