@@ -1,0 +1,249 @@
+diff --git a/hw/arm/db2010-checkpoint.c b/hw/arm/db2010-checkpoint.c
+index cac1c875cf..e94ca161b7 100644
+--- a/hw/arm/db2010-checkpoint.c
++++ b/hw/arm/db2010-checkpoint.c
+@@ -359,6 +359,7 @@ static bool checkpoint_load(QEMUFile *f, void *pv, size_t size,
+     DB2010MachineState *s = pv;
+     Checkpoint context = {.file = f, .load = true};
+     if (!cp_machine(&context, s)) { error_setg(errp, "invalid DB2010 checkpoint state"); return false; }
++    db2010_midi_stream_discard_soundfont(&s->fa->dsp_peer->state.midi);
+     /* Clock outputs are derived from the existing serialized register latches.
+      * No extra checkpoint state or layout change is required. */
+     dbsys_update(s->syscon);
+diff --git a/hw/arm/db2010-dsp-peer.c b/hw/arm/db2010-dsp-peer.c
+index d4d278804e..27d82f8e70 100644
+--- a/hw/arm/db2010-dsp-peer.c
++++ b/hw/arm/db2010-dsp-peer.c
+@@ -139,7 +139,8 @@ QDict *dbdsp_snapshot(DB2010DspPeer *p)
+         qdict_put(r, "midi_modulation", modulation);
+         qdict_put_int(r, "midi_enabled_channels", m->synth.enabled_channels);
+         qdict_put_int(r, "midi_gm_mode", m->synth.gm_mode);
+-        qdict_put_str(r, "midi_bank_policy", "all-banks-use-host-triangle");
++        bool soundfont = db2010_midi_stream_uses_soundfont(m);
++        qdict_put_str(r, "midi_bank_policy", soundfont ? "soundfont-with-gm-fallback" : "all-banks-use-host-triangle");
+         qdict_put_int(r, "midi_buffered_words", m->used);
+         GString *pending = g_string_new(NULL);
+         for (unsigned i = 0; i < MIN(m->used, 64); i++) {
+@@ -159,7 +160,7 @@ QDict *dbdsp_snapshot(DB2010DspPeer *p)
+         qdict_put_bool(r, "midi_eof", m->eof);
+         qdict_put_bool(r, "midi_completed", m->completed);
+         qdict_put_bool(r, "midi_completion_sent", m->completion_sent);
+-        qdict_put_str(r, "midi_processing", "host-40-triangle-48000-stereo-pan");
++        qdict_put_str(r, "midi_processing", soundfont ? "host-40-soundfont-48000-stereo" : "host-40-triangle-48000-stereo-pan");
+         char hash[17]; snprintf(hash, sizeof(hash), "%016" PRIx64, m->pcm_hash);
+         qdict_put_str(r, "midi_pcm_fnv1a64", hash);
+     }
+@@ -325,6 +326,7 @@ QDict *dbdsp_snapshot(DB2010DspPeer *p)
+ 
+ void dbdsp_reset(DB2010DspPeer *d)
+ {
++    db2010_midi_stream_discard_soundfont(&d->state.midi);
+     db2010_audio_output_reset(d->output);
+     qobject_unref(d->encoded_frames); d->encoded_frames = qlist_new();
+     d->encoded_frame_count = 0;
+@@ -879,6 +881,7 @@ static void dbdsp_mailbox_complete(DB2010DspPeer *p, const DB2010DspEvent *e)
+                 p->state.rx_mailbox[1] = 0x301;
+                 p->state.rx_mailbox[2] = 1001;
+                 p->state.rx_mailbox[3] = 20;
++                db2010_midi_stream_discard_soundfont(midi);
+                 db2010_midi_stream_init(midi);
+                 db2010_audio_output_new_stream(p->output);
+             } else if (opcode == 0x600) {
+diff --git a/hw/arm/db2010-midi-stream.c b/hw/arm/db2010-midi-stream.c
+index 5d7ede23c3..3917b1d88c 100644
+--- a/hw/arm/db2010-midi-stream.c
++++ b/hw/arm/db2010-midi-stream.c
+@@ -6,6 +6,105 @@
+ #include "qemu/osdep.h"
+ #include "db2010-midi-stream.h"
+ 
++#ifdef CONFIG_DB2010_SOUNDFONT
++#define TSF_IMPLEMENTATION
++#include <tsf.h>
++
++static void soundfont_program(DB2010MidiStream *m, unsigned channel)
++{
++    tsf_channel_set_bank(m->soundfont, channel, m->synth.bank[channel]);
++    if (!tsf_channel_set_presetnumber(m->soundfont, channel,
++                                      m->synth.program[channel], channel == 9)) {
++        tsf_channel_set_presetnumber(m->soundfont, channel, 0, channel == 9);
++    }
++}
++
++static void soundfont_start(DB2010MidiStream *m)
++{
++    static bool loaded;
++    static tsf *bank;
++    if (!loaded) {
++        const char *path = getenv("PH0NIX_MIDI_SOUNDFONT");
++        loaded = true;
++        if (path && *path) {
++            bank = tsf_load_filename(path);
++            if (bank) {
++                tsf_set_output(bank, TSF_STEREO_INTERLEAVED, 48000, -8.0f);
++            } else {
++                fprintf(stderr, "K750i MIDI: could not load the bundled SoundFont\n");
++            }
++        }
++    }
++    m->soundfont = bank ? tsf_copy(bank) : NULL;
++    if (m->soundfont && !tsf_set_max_voices(m->soundfont, DB2010_MIDI_VOICES)) {
++        db2010_midi_stream_discard_soundfont(m);
++    }
++    if (m->soundfont) {
++        for (unsigned channel = 0; channel < 16; channel++) {
++            soundfont_program(m, channel);
++        }
++    }
++}
++
++static void soundfont_event(DB2010MidiStream *m, unsigned status,
++                            unsigned first, unsigned second)
++{
++    tsf *font = m->soundfont;
++    unsigned channel = status & 15;
++    DB2010MidiSynth *synth = &m->synth;
++    switch (status >> 4) {
++    case 8:
++    case 9:
++        if ((status >> 4) == 8 || !second) {
++            tsf_channel_note_off(font, channel, first);
++        } else if (synth->enabled_channels & (1u << channel)) {
++            tsf_channel_note_on(font, channel, first, second / 127.0f);
++        }
++        break;
++    case 11:
++        if (first == 7 || first == 11 || first == 121) {
++            tsf_channel_set_volume(font, channel,
++                (synth->volume[channel] * synth->expression[channel]) / (127.0f * 127.0f));
++        }
++        if (first == 10) {
++            tsf_channel_set_pan(font, channel, second / 127.0f);
++        } else if (first == 120) {
++            tsf_channel_sounds_off_all(font, channel);
++        } else if (first == 123) {
++            tsf_channel_note_off_all(font, channel);
++        } else if (first == 121) {
++            tsf_channel_set_pitchwheel(font, channel, synth->bend[channel]);
++        }
++        break;
++    case 12:
++        soundfont_program(m, channel);
++        break;
++    case 14:
++        tsf_channel_set_pitchwheel(font, channel, synth->bend[channel]);
++        break;
++    }
++}
++#endif
++
++bool db2010_midi_stream_uses_soundfont(const DB2010MidiStream *m)
++{
++#ifdef CONFIG_DB2010_SOUNDFONT
++    return m->soundfont != NULL;
++#else
++    return false;
++#endif
++}
++
++void db2010_midi_stream_discard_soundfont(DB2010MidiStream *m)
++{
++#ifdef CONFIG_DB2010_SOUNDFONT
++    if (m->soundfont) {
++        tsf_close(m->soundfont);
++        m->soundfont = NULL;
++    }
++#endif
++}
++
+ void db2010_midi_stream_init(DB2010MidiStream *m)
+ {
+     *m = (DB2010MidiStream){.pcm_hash = UINT64_C(14695981039346656037)};
+@@ -50,6 +149,12 @@ static void packet(DB2010MidiStream *m, DB2010AudioSink *sink, bool eos)
+ }
+ void db2010_midi_stream_run(DB2010MidiStream *m, uint64_t now)
+ {
++#ifdef CONFIG_DB2010_SOUNDFONT
++    if (!m->paused && !m->frames && !m->events) {
++        db2010_midi_stream_discard_soundfont(m);
++        soundfont_start(m);
++    }
++#endif
+     m->origin_ns = now; m->origin_frame = m->frames;
+     m->active = true; m->paused = false;
+     m->samples.discontinuity = true;
+@@ -61,6 +166,7 @@ void db2010_midi_stream_pause(DB2010MidiStream *m, DB2010AudioSink *sink)
+ }
+ void db2010_midi_stream_stop(DB2010MidiStream *m, DB2010AudioSink *sink)
+ {
++    db2010_midi_stream_discard_soundfont(m);
+     m->active = m->paused = false;
+     m->completion_requested = false;
+     memset(&m->synth.voices, 0, sizeof(m->synth.voices));
+@@ -103,6 +209,22 @@ const char *db2010_midi_stream_advance(DB2010MidiStream *m, DB2010AudioSink *sin
+                     db2010_midi_long_event(&m->synth, b[1], b + 5, b[2]) :
+                     db2010_midi_event(&m->synth, b[0], b[1], b[2]);
+                 if (fault) { return fault; }
++#ifdef CONFIG_DB2010_SOUNDFONT
++                if (m->soundfont && !end) {
++                    if (!extended) {
++                        soundfont_event(m, b[0], b[1], b[2]);
++                    } else if (b[1] == 1) {
++                        for (unsigned channel = 0; channel < 16; channel++) {
++                            if (!(m->synth.enabled_channels & (1u << channel))) {
++                                tsf_channel_sounds_off_all(m->soundfont, channel);
++                            }
++                        }
++                    } else if (b[1] == 2 || b[1] == 3) {
++                        db2010_midi_stream_discard_soundfont(m);
++                        soundfont_start(m);
++                    }
++                }
++#endif
+                 if (end) {
+                     /* The native parser flushes the zero sentinel on every
+                      * pending refill after the parser reaches EOT. Native
+@@ -115,6 +237,13 @@ const char *db2010_midi_stream_advance(DB2010MidiStream *m, DB2010AudioSink *sin
+                     if (!m->eof) {
+                         m->eof = true;
+                         m->end_frame = m->frames + DB2010_MIDI_RELEASE;
++#ifdef CONFIG_DB2010_SOUNDFONT
++                        if (m->soundfont) {
++                            for (unsigned channel = 0; channel < 16; channel++) {
++                                tsf_channel_note_off_all(m->soundfont, channel);
++                            }
++                        }
++#endif
+                         for (unsigned i = 0; i < DB2010_MIDI_VOICES; i++) {
+                             DB2010MidiVoice *v = &m->synth.voices[i];
+                             if (v->held) { v->held = false; v->release = DB2010_MIDI_RELEASE; }
+@@ -140,6 +269,11 @@ const char *db2010_midi_stream_advance(DB2010MidiStream *m, DB2010AudioSink *sin
+             }
+             int16_t *pcm = s->pcm + s->frames * 2;
+             db2010_midi_render(&m->synth, pcm, n);
++#ifdef CONFIG_DB2010_SOUNDFONT
++            if (m->soundfont) {
++                tsf_render_short(m->soundfont, pcm, n, 0);
++            }
++#endif
+             for (unsigned i = 0; i < n * 2; i++) {
+                 uint16_t value = pcm[i];
+                 m->nonzero_samples += value != 0;
+diff --git a/hw/arm/db2010-midi-stream.h b/hw/arm/db2010-midi-stream.h
+index c656fe6194..ecb38320f9 100644
+--- a/hw/arm/db2010-midi-stream.h
++++ b/hw/arm/db2010-midi-stream.h
+@@ -14,8 +14,13 @@ typedef struct DB2010MidiStream {
+     bool credit_notify, flush_pending;
+     uint64_t frames, origin_ns, origin_frame, last_time, end_frame;
+     uint64_t pcm_hash, nonzero_samples, events, words_received, words_credited;
++#ifdef CONFIG_DB2010_SOUNDFONT
++    struct tsf *soundfont;
++#endif
+ } DB2010MidiStream;
+ void db2010_midi_stream_init(DB2010MidiStream *m);
++void db2010_midi_stream_discard_soundfont(DB2010MidiStream *m);
++bool db2010_midi_stream_uses_soundfont(const DB2010MidiStream *m);
+ const char *db2010_midi_stream_check_append(const DB2010MidiStream *m,
+                                            const uint16_t *words, unsigned count);
+ const char *db2010_midi_stream_append(DB2010MidiStream *m, const uint16_t *words,

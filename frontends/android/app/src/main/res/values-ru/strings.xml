@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ph0nix</string>
     <string name="phone_documents_choose_storage">Для копирования на карту откройте Memory Stick и выберите карту. Для памяти телефона откройте «Внутренняя память».</string>
     <string name="card_documents_title">Memory Stick (карта памяти)</string>
     <string name="card_documents_in_use">Остановите K750i в ph0nix, дождитесь сохранения карты и снова откройте эту папку.</string>

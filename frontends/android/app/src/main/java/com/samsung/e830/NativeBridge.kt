@@ -9,7 +9,7 @@ internal object NativeBridge {
     external fun nativeStart(cla: String, eeprom: String, tfs: String, onenand: String): Long
     external fun nativeProfiles(): String
     external fun nativeCatalog(): String
-    external fun nativeConfigure(engine: String, dataDirectory: String, resume: Boolean)
+    external fun nativeConfigure(engine: String, dataDirectory: String, resume: Boolean, midiSoundFont: String)
     external fun nativeSetKeys(handle: Long, mask: Int)
     external fun nativeKeyBindings(device: String): String
     external fun nativeValidateSelection(selection: String): String

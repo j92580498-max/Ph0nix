@@ -23,6 +23,18 @@ are packaged as `assets/licenses/minimp3-CC0.txt` and
 `assets/licenses/FAAD2-GPL-2.0.txt`. These codec libraries provide DSP service
 responses; the original firmware controls media files and players.
 
+The optional Android SoundFont renderer uses TinySoundFont under MIT. The
+exact revision and checksum are pinned in `build-support/build_qemu.py`;
+the license is packaged in `assets/licenses/TinySoundFont-MIT.txt`.
+
+For a personal test APK, build with `-Pph0nixTestApk=true` and
+`-Pph0nixMidiSoundFont=/absolute/path/Sony_Ericsson_A100_DB2020_Synth_1.0.5.sf2`.
+This installs as `org.featurephone.emulator.test`, alongside the regular app.
+The original bank is by Rubén Díaz (RibénDíaz232), sampled from a W580i, and
+should not be committed or included in public build artifacts. Without the
+bank, MIDI uses the existing triangle renderer. An in-progress track restored
+from a saved VM state uses that renderer until the next track starts.
+
 ## PocketHLE Android library UI
 
 The Android library card layout, launcher-style grid, theme, selected vector drawables and NDK linker-support pattern are adapted from [j92580498-max/PocketHLE](https://github.com/j92580498-max/PocketHLE), commit `25d13039d8f0ad3755b441215745a53e382edb1b`. PocketHLE is dual-licensed under Apache-2.0 or MIT; the corresponding license texts are in `third_party/PocketHLE/` and in the APK at `app/src/main/assets/licenses/PocketHLE/`.

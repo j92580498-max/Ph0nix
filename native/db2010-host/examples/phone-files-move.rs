@@ -158,6 +158,7 @@ fn main() -> Result<()> {
     }
     let options = HostOptions {
         engine,
+        midi_soundfont: None,
         data_dir: workspace.clone(),
         resume: true,
     };

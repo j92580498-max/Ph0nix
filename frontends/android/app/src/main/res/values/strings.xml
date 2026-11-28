@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">ph0nix</string>
     <string name="phone_documents_choose_storage">For a memory card, open Memory Stick and choose a card. For phone memory, open Internal memory.</string>
     <string name="card_documents_title">Memory Stick (memory card)</string>
     <string name="card_documents_in_use">Stop the K750i in ph0nix and wait for the Memory Stick to finish saving. Then reopen this folder.</string>
