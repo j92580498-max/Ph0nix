@@ -174,6 +174,9 @@
     <string name="card_inserted_description">Эта карта Memory Stick вставлена в телефон. Воспользуйтесь диспетчером файлов K750i или остановите телефон для работы с образом.</string>
     <string name="card_fat16_description">Образ FAT16 · %1$d МиБ. %2$s</string>
     <string name="card_export">Экспортировать образ…</string>
+    <string name="card_export_title">Экспорт карты памяти…</string>
+    <string name="card_export_no_images">Нет карт для экспорта. Создайте или импортируйте образ при запуске K750i.</string>
+    <string name="card_export_working">Экспорт карты памяти…</string>
     <string name="card_missing_or_empty">Образ карты отсутствует или пуст.</string>
     <string name="card_busy">Уже создаётся другой образ карты.</string>
     <string name="card_created">Образ карты создан.</string>

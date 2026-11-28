@@ -102,17 +102,40 @@ impl CardImage {
     pub fn path(&self) -> &Path {
         &self.path
     }
-    fn with_fs<T>(&self, operation: impl FnOnce(&Disk<'_>, u64) -> Result<T>) -> Result<T> {
-        let mut file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&self.path)?;
+    fn locked_file(path: &Path) -> Result<fs::File> {
+        let file = fs::OpenOptions::new().read(true).write(true).open(path)?;
         ensure!(
             file.metadata()?.is_file(),
             "Choose a regular card image file"
         );
         file.try_lock()
             .map_err(|e| anyhow::anyhow!("Card image is in use: {e}"))?;
+        Ok(file)
+    }
+
+    pub fn snapshot(source: &Path, destination: &Path) -> Result<()> {
+        let mut source = Self::locked_file(source)?;
+        let expected = source.metadata()?.len();
+        ensure!(expected > 0, "The card image is empty");
+        let mut output = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(destination)?;
+        let result = (|| {
+            let written = std::io::copy(&mut source, &mut output)?;
+            ensure!(written == expected, "The card image size changed");
+            output.sync_all()?;
+            Ok(())
+        })();
+        drop(output);
+        if result.is_err() {
+            let _ = fs::remove_file(destination);
+        }
+        result
+    }
+
+    fn with_fs<T>(&self, operation: impl FnOnce(&Disk<'_>, u64) -> Result<T>) -> Result<T> {
+        let mut file = Self::locked_file(&self.path)?;
         let size = file.metadata()?.len();
         ensure!(
             (16 * 1024 * 1024..=1024 * 1024 * 1024).contains(&size) && size % (32 * 1024) == 0,
@@ -434,6 +457,35 @@ mod tests {
     }
     fn path(p: &str) -> Vec<String> {
         p.split('/').map(String::from).collect()
+    }
+
+    #[test]
+    fn snapshot_copies_the_whole_card_only_when_unlocked() {
+        let dir = WorkDir::new();
+        let card = CardImage::create(&dir.0.join("card.img"), 16).unwrap();
+        let payload = dir.0.join("source");
+        fs::write(&payload, [1, 2, 3, 4]).unwrap();
+        let entry = path("data.bin");
+        card.import_file(&entry, &payload, false, false).unwrap();
+        let destination = dir.0.join("snapshot.img");
+
+        let lock = CardImage::locked_file(card.path()).unwrap();
+        let error = CardImage::snapshot(card.path(), &destination).unwrap_err();
+        assert!(error.to_string().contains("Card image is in use"));
+        assert!(!destination.exists());
+        drop(lock);
+
+        CardImage::snapshot(card.path(), &destination).unwrap();
+        assert_eq!(
+            fs::read(card.path()).unwrap(),
+            fs::read(&destination).unwrap()
+        );
+        card.delete(&entry).unwrap();
+        assert!(CardImage::snapshot(card.path(), &destination).is_err());
+        let backup = CardImage::open(&destination).unwrap();
+        let restored = dir.0.join("restored");
+        backup.export_file(&entry, &restored, false).unwrap();
+        assert_eq!(fs::read(restored).unwrap(), [1, 2, 3, 4]);
     }
     #[test]
     fn capacity_tracks_fat_allocation_and_excludes_metadata() {

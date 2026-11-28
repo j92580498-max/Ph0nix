@@ -15,6 +15,7 @@ internal class FirmwareAdapter(
     private val onUseErasedFlash: (FirmwareEntry) -> Unit,
     private val onExportMemory: (FirmwareEntry) -> Unit,
     private val onImportMemory: (FirmwareEntry) -> Unit,
+    private val onExportCard: (FirmwareEntry) -> Unit,
     private val onRemove: (FirmwareEntry) -> Unit,
 ) : RecyclerView.Adapter<FirmwareAdapter.ViewHolder>() {
     private var items: List<FirmwareEntry> = emptyList()
@@ -61,6 +62,7 @@ internal class FirmwareAdapter(
             if (entry.device == "k750i") {
                 popup.menu.add(0, ACTION_EXPORT_MEMORY, 2, R.string.k750_memory_export)
                 popup.menu.add(0, ACTION_IMPORT_MEMORY, 2, R.string.k750_memory_import)
+                popup.menu.add(0, ACTION_EXPORT_CARD, 2, R.string.card_export_title)
             }
             popup.menu.add(0, ACTION_REMOVE, 3, R.string.remove_firmware)
             popup.setOnMenuItemClickListener { item ->
@@ -71,6 +73,7 @@ internal class FirmwareAdapter(
                     ACTION_USE_ERASED -> onUseErasedFlash(entry)
                     ACTION_EXPORT_MEMORY -> onExportMemory(entry)
                     ACTION_IMPORT_MEMORY -> onImportMemory(entry)
+                    ACTION_EXPORT_CARD -> onExportCard(entry)
                     ACTION_REMOVE -> onRemove(entry)
                 }
                 true
@@ -87,5 +90,6 @@ internal class FirmwareAdapter(
         const val ACTION_EXPORT_MEMORY = 5
         const val ACTION_IMPORT_MEMORY = 6
         const val ACTION_RENAME = 7
+        const val ACTION_EXPORT_CARD = 8
     }
 }

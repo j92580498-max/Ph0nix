@@ -1,4 +1,4 @@
-name: K750i internal storage
+name: K750i cold boot and Android APK
 on:
   workflow_dispatch:
 permissions:

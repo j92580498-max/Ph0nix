@@ -55,6 +55,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingMemoryEntryId: String? = null
     private var pendingMemoryExport: File? = null
     private var pendingCardEntryId: String? = null
+    private var pendingCardExportName: String? = null
     private var importDevice = "k750i"
     private var busy = false
     private lateinit var preferences: AppPreferences
@@ -97,6 +98,10 @@ class MainActivity : AppCompatActivity() {
         ActivityResultContracts.OpenDocument(),
     ) { uri -> finishMemoryImport(uri) }
 
+    private val exportCardDocument = registerForActivityResult(
+        ActivityResultContracts.CreateDocument("application/octet-stream"),
+    ) { uri -> finishCardExport(uri) }
+
     private val selectMidiSoundFont = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) updateMidiSoundFont(uri)
     }
@@ -114,6 +119,7 @@ class MainActivity : AppCompatActivity() {
         pendingMemoryEntryId = savedInstanceState?.getString(STATE_MEMORY_ENTRY)
         pendingMemoryExport = savedInstanceState?.getString(STATE_MEMORY_EXPORT)?.let { File(cacheDir, it) }
         pendingCardEntryId = savedInstanceState?.getString(STATE_CARD_ENTRY)
+        pendingCardExportName = savedInstanceState?.getString(STATE_CARD_EXPORT)
         importDevice = savedInstanceState?.getString(STATE_IMPORT_DEVICE)
             ?.takeIf { DeviceProfiles.find(it) != null } ?: importDevice
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -136,6 +142,7 @@ class MainActivity : AppCompatActivity() {
             onUseErasedFlash = ::useAutomaticNand,
             onExportMemory = ::chooseMemoryExport,
             onImportMemory = ::confirmMemoryImport,
+            onExportCard = ::chooseCardExport,
             onRemove = ::confirmRemove,
         )
         recycler.adapter = adapter
@@ -172,6 +179,7 @@ class MainActivity : AppCompatActivity() {
         outState.putString(STATE_MEMORY_ENTRY, pendingMemoryEntryId)
         outState.putString(STATE_MEMORY_EXPORT, pendingMemoryExport?.name)
         outState.putString(STATE_CARD_ENTRY, pendingCardEntryId)
+        outState.putString(STATE_CARD_EXPORT, pendingCardExportName)
         outState.putString(STATE_IMPORT_DEVICE, importDevice)
         outState.putInt("tab", tabs.selectedTabPosition)
         super.onSaveInstanceState(outState)
@@ -583,14 +591,62 @@ class MainActivity : AppCompatActivity() {
         showMessage(message)
     }
 
+    private fun cardsFor(entry: FirmwareEntry): List<File> {
+        val lastCard = preferences.phoneCard(entry.id)
+        return MemoryStickImages.list(MemoryStickImages.directory(filesDir)).sortedBy { it.name != lastCard }
+    }
+
+    private fun chooseCardExport(entry: FirmwareEntry) {
+        if (busy || pendingCardExportName != null) return
+        val cards = cardsFor(entry)
+        if (cards.isEmpty()) {
+            showMessage(getString(R.string.card_export_no_images))
+            return
+        }
+        val labels = cards.map { MemoryStickImages.label(this, it) }.toTypedArray()
+        MaterialAlertDialogBuilder(this).setTitle(R.string.card_export_title)
+            .setItems(labels) { _, index ->
+                val card = cards[index]
+                if (!card.isFile || card.length() == 0L) {
+                    showMessage(getString(R.string.card_missing_or_empty))
+                } else {
+                    pendingCardExportName = card.name
+                    runCatching { exportCardDocument.launch(card.name) }.onFailure {
+                        pendingCardExportName = null
+                        reportCardExportFailure(it)
+                    }
+                }
+            }.setNegativeButton(R.string.cancel, null).show()
+    }
+
+    private fun finishCardExport(uri: Uri?) {
+        val name = pendingCardExportName
+        pendingCardExportName = null
+        if (uri == null) return
+        setBusy(true)
+        status.setText(R.string.card_export_working)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO + NonCancellable) {
+                runCatching { writeCardImageExport(uri, name) }
+            }
+            setBusy(false)
+            result.fold({ status.setText(R.string.card_exported) }, ::reportCardExportFailure)
+        }
+    }
+
+    private fun reportCardExportFailure(error: Throwable) {
+        val message = getString(R.string.export_failed, error.localizedMessage ?: getString(R.string.unknown_error))
+        status.text = message
+        showMessage(message)
+    }
+
     private fun runFirmware(entry: FirmwareEntry) {
         if (busy) return
         if (entry.device != "k750i") {
             launchFirmware(entry, null)
             return
         }
-        val lastCard = preferences.phoneCard(entry.id)
-        val cards = MemoryStickImages.list(MemoryStickImages.directory(filesDir)).sortedBy { it.name != lastCard }
+        val cards = cardsFor(entry)
         val choices = listOf(R.string.card_boot_without, R.string.card_boot_create, R.string.card_boot_import).map(::getString) +
             cards.map { MemoryStickImages.label(this, it) }
         MaterialAlertDialogBuilder(this).setTitle(R.string.card_boot_title)
@@ -768,6 +824,7 @@ class MainActivity : AppCompatActivity() {
         const val STATE_MEMORY_ENTRY = "pendingMemoryEntryId"
         const val STATE_MEMORY_EXPORT = "pendingMemoryExport"
         const val STATE_CARD_ENTRY = "pendingCardEntryId"
+        const val STATE_CARD_EXPORT = "pendingCardExportName"
         const val MAX_MEMORY_FILE_BYTES = 65L * 1024 * 1024
         const val STATE_IMPORT_DEVICE = "importDevice"
     }

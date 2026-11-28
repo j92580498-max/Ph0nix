@@ -8,14 +8,35 @@ import java.io.DataInputStream
 import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
+import java.util.UUID
+import org.json.JSONObject
 
-internal fun Context.writeDocumentExport(uri: Uri, source: File?) {
-    publishDocumentExport(
-        source,
-        openDestination = {
+internal fun Context.writeDocumentExport(uri: Uri, source: File?) = writeDocumentExport(uri) { source }
+
+internal fun Context.writeCardImageExport(uri: Uri, name: String?) {
+    val staged = File(cacheDir, "card-export-${UUID.randomUUID()}.img")
+    try {
+        writeDocumentExport(uri) {
+            val image = name?.let { MemoryStickImages.find(MemoryStickImages.directory(filesDir), it) }
+                ?: throw IOException(getString(R.string.card_missing_or_empty))
+            val request = JSONObject().put("operation", "snapshot").put("image", image.absolutePath)
+                .put("host", staged.absolutePath)
+            val response = JSONObject(NativeBridge.nativeCardRequest(request.toString()))
+            if (response.has("error")) throw IOException(response.getString("error"))
+            staged
+        }
+    } finally {
+        staged.delete()
+    }
+}
+
+private fun Context.writeDocumentExport(uri: Uri, prepareSource: () -> File?) {
+    publishPreparedDocumentExport(
+        prepareSource = {
             if (uri.authority == "$packageName.storage") throw IOException(getString(R.string.export_outside_phone))
-            contentResolver.openOutputStream(uri, "wt")
+            prepareSource()
         },
+        openDestination = { contentResolver.openOutputStream(uri, "wt") },
         readDestination = { contentResolver.openInputStream(uri) },
         discardDestination = {
             if (!DocumentsContract.deleteDocument(contentResolver, uri)) {
@@ -30,8 +51,16 @@ internal fun publishDocumentExport(
     openDestination: () -> OutputStream?,
     readDestination: () -> InputStream?,
     discardDestination: () -> Unit,
+) = publishPreparedDocumentExport({ source }, openDestination, readDestination, discardDestination)
+
+internal fun publishPreparedDocumentExport(
+    prepareSource: () -> File?,
+    openDestination: () -> OutputStream?,
+    readDestination: () -> InputStream?,
+    discardDestination: () -> Unit,
 ) {
     try {
+        val source = prepareSource()
         if (source == null || !source.isFile) throw IOException("The export source is missing.")
         val expected = source.length()
         if (expected == 0L) throw IOException("The export source is empty.")

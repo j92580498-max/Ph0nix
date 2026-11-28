@@ -14,6 +14,11 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCardRequest<'loc
             .remove("include_snapshot").and_then(|value| value.as_bool()).unwrap_or(true);
         let image = PathBuf::from(request["image"].as_str().ok_or("Choose a card image")?);
         let operation = request["operation"].as_str().unwrap_or("info").to_owned();
+        if operation == "snapshot" {
+            let destination = PathBuf::from(request["host"].as_str().ok_or("Choose a snapshot destination")?);
+            CardImage::snapshot(&image, &destination).map_err(|e| format!("{e:#}"))?;
+            return Ok(json!({}));
+        }
         let card = if operation == "create" {
             CardImage::create(&image, request["size_mib"].as_u64().unwrap_or(64))
         } else { CardImage::open(&image) }.map_err(|e| format!("{e:#}"))?;

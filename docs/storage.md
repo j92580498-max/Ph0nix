@@ -12,11 +12,10 @@ With resume enabled, the VM checkpoint is kept separately. Its metadata refers t
 
 On a runner with a built DB2010 engine and a disposable copied firmware workspace, `cargo run --locked -p db2010-host --example phone-files-resume -- ENGINE COPIED_STATE CHECKPOINT cold-boot` checks export, import, rejection of corruption and byte-for-byte readback after a cold boot. Omitting `cold-boot` runs the VM-resume regression. `--fresh NEW_DATA_DIR MAIN FS` creates two phones from the same MAIN/FS paths, verifies separate memory files, and checks that only an explicit import changes the second phone.
 
-The `K750i internal storage` GitHub Actions workflow runs on pushes to
-`test/k750i-internal-storage`. It uses the `self-hosted` and `Linux` runner labels;
-add the container's custom label under `runs-on` if the repository has several
-Linux runners. The workflow sets up stable Rust for the runner user. The
-container needs Python 3 with `venv` and these build packages (Debian/Ubuntu
+Run **K750i cold boot and Android APK** manually from `main` in the original
+`j92580498-max/Ph0nix` repository. It uses the owner's Linux x64 self-hosted
+runner labeled `ph0nix-owner`. The workflow sets up stable Rust for the runner
+user. The runner needs Python 3 with `venv` and these build packages (Debian/Ubuntu
 names): `build-essential`, `cmake`, `ninja-build`,
 `pkg-config`, `python3-venv`, `clang`, `libclang-dev`, `libglib2.0-dev`,
 `libpixman-1-dev`, `libfdt-dev` and `zlib1g-dev`. It builds the pinned engine,
@@ -54,6 +53,8 @@ On Android 8.0 or later, open **Files → ph0nix → [phone name]**. To copy a f
 
 - **Internal memory** shows the K750i user folders. Return to the ph0nix library and wait for the phone to finish saving before opening them. The phone still holds its memory while paused or in the background. Files go to the chosen folder directly; you can see them on the next boot.
 - **Memory Stick (memory card)** lists card images by name and size. Files also shows total, used and free space from FAT allocation; the launch picker shows the nominal image size. Cards are shared across K750i machines. Create or import a card from the launch menu if the list is empty. Stop the phone using a card and wait for it to finish saving before editing the card from Files. Start the phone with the same card to see the files.
+
+To export an entire card on Android, stop the phone and wait for saving to finish. In **Library → K750i entry → ⋮ → Export memory card…**, choose an image and save the `.img` to Downloads or another folder outside ph0nix. Export needs free space for a temporary copy in the app cache as well as the saved image. The app verifies the saved image and asks the document provider to remove it if the export fails. To reuse the exported card, choose **Import an image and start…** when launching K750i.
 
 If your file manager does not show ph0nix, use Android's system Files app.
 

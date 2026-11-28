@@ -36,6 +36,20 @@ class DocumentExportTest {
     }
 
     @Test
+    fun failedSnapshotDiscardsThePickerDocumentWithoutOpeningIt() {
+        val destination = temporary.newFile()
+        assertThrows(IOException::class.java) {
+            publishPreparedDocumentExport(
+                prepareSource = { throw IOException("Card image is in use") },
+                openDestination = { error("Opened a document without a snapshot") },
+                readDestination = { error("Verified a document without a snapshot") },
+                discardDestination = { destination.delete() },
+            )
+        }
+        assertFalse(destination.exists())
+    }
+
+    @Test
     fun closeFailureDiscardsIncompleteDocumentAndPreservesTheSource() {
         val source = temporary.newFile().apply { writeText("memory backup") }
         val destination = temporary.newFile()

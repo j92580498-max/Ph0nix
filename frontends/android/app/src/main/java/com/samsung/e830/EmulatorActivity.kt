@@ -79,7 +79,7 @@ class EmulatorActivity : AppCompatActivity() {
     private var activeFile: PendingFile? = null
     private var activeFileId = 0L
     private var lastFileErrorId = 0L
-    private var documentExport: File? = null
+    private var cardExportName: String? = null
     private var cardBusy = false
     private lateinit var bluetooth: BluetoothBridge
     private var bluetoothStatus: TextView? = null
@@ -126,11 +126,11 @@ class EmulatorActivity : AppCompatActivity() {
         }
     }
     private val exportDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        val image = documentExport
-        documentExport = null
+        val name = cardExportName
+        cardExportName = null
         if (uri != null) fileExecutor.execute {
             val result = runCatching {
-                writeDocumentExport(uri, image)
+                writeCardImageExport(uri, name)
             }
             runOnUiThread {
                 if (isFinishing || isDestroyed) return@runOnUiThread
@@ -146,7 +146,7 @@ class EmulatorActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         preferences = AppPreferences(this)
-        documentExport = savedInstanceState?.getString("document_export")?.let(::File)
+        cardExportName = savedInstanceState?.getString("card_export_name")
         bluetooth = BluetoothBridge(this, File(filesDir, "bluetooth-inbox"), { level, message ->
             val handle = sessionHandle.get(); val token = generation.get()
             if (handle != 0L) runCatching { nativeExecutor.execute {
@@ -256,7 +256,7 @@ class EmulatorActivity : AppCompatActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putBoolean("fullscreen", fullscreen)
-        outState.putString("document_export", documentExport?.absolutePath)
+        outState.putString("card_export_name", cardExportName)
         super.onSaveInstanceState(outState)
     }
 
@@ -637,7 +637,7 @@ class EmulatorActivity : AppCompatActivity() {
             .setMessage(getString(R.string.card_fat16_description, image.length() / 1048576, getString(R.string.card_choose_at_start)))
             .setNeutralButton(R.string.card_export) { _, _ ->
                 if (image.isFile && image.length() > 0) {
-                    documentExport = image
+                    cardExportName = image.name
                     exportDocument.launch(image.name)
                 } else {
                     Toast.makeText(this, R.string.card_missing_or_empty, Toast.LENGTH_LONG).show()
