@@ -27,11 +27,8 @@ The optional Android SoundFont renderer uses TinySoundFont under MIT. The
 exact revision and checksum are pinned in `build-support/build_qemu.py`;
 the license is packaged in `assets/licenses/TinySoundFont-MIT.txt`.
 
-The repository and regular APK do not include a SoundFont. Users can import
-their own `.sf2` from Android settings. A personal test APK can optionally bundle
-a default bank with `-Pph0nixTestApk=true` and
-`-Pph0nixMidiSoundFont=/absolute/path/bank.sf2`. It installs as
-`org.featurephone.emulator.test`, alongside the regular app.
+The repository and APK do not include a SoundFont. Users can import their own
+`.sf2` from the app settings on Android.
 
 ## PocketHLE Android library UI
 

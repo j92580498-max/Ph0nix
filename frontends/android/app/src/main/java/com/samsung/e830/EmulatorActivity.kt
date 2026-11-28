@@ -305,7 +305,7 @@ class EmulatorActivity : AppCompatActivity() {
                 NativeBridge.nativeConfigure(
                     File(applicationInfo.nativeLibraryDir, "libdb2010_engine.so").absolutePath,
                     File(filesDir, "sessions").absolutePath, preferences.resume,
-                    (UserMidiSoundFont.path(this) ?: BundledMidiSoundFont.prepare(this)).orEmpty(),
+                    UserMidiSoundFont.path(this).orEmpty(),
                 )
                 NativeBridge.nativeStartSelection(selection, intent.getStringExtra(EXTRA_MEMORY_WORKSPACE).orEmpty(), bootCard).also {
                     check(it != 0L) { getString(R.string.phone_start_failed) }
