@@ -17,6 +17,7 @@ jobs:
     env:
       PYTHONPATH: src
       UNICORN_NO_PKG_CONFIG: '1'
+      PH0NIX_UPGRADE_CERT_SHA256: '6afca99ee47fb55c27316d9c7f38f36a1ad7a19779505c49217c51c5758dc012'
     steps:
       - uses: actions/checkout@v4
         with:
@@ -28,6 +29,15 @@ jobs:
         with:
           distribution: temurin
           java-version: '17'
+      - name: Verify the existing upgrade signing key
+        shell: bash
+        run: |
+          keystore="${ANDROID_USER_HOME:-$HOME/.android}/debug.keystore"
+          if [[ ! -f "$keystore" ]] || ! keytool -exportcert -keystore "$keystore" \
+              -storepass android -alias androiddebugkey | sha256sum --check --status <(printf '%s  -\n' "$PH0NIX_UPGRADE_CERT_SHA256"); then
+            echo '::error::The runner does not have the signing key for existing K750i APK installations.'
+            exit 1
+          fi
       - name: Install the Android SDK and NDK
         run: |
           sdk="$HOME/.android/ph0nix-sdk"
@@ -106,25 +116,25 @@ jobs:
             find "$work/phone" -type f -name engine.log -exec tail -n 60 {} \; || true
             exit 1
           fi
-      - name: Build and test the test APK
+      - name: Build and test the upgrade APK
         working-directory: frontends/android
-        run: ./gradlew --no-daemon --console=plain -Pph0nixTestApk=true assembleRelease lintRelease testDebugUnitTest
+        run: ./gradlew --no-daemon --console=plain assembleRelease lintRelease testDebugUnitTest
       - name: Verify and package the APK
         run: |
           mkdir -p dist/k750i-android
-          apk=dist/k750i-android/ph0nix-k750i-test-arm64.apk
+          apk=dist/k750i-android/ph0nix-k750i-arm64.apk
           cp frontends/android/app/build/outputs/apk/release/app-release.apk "$apk"
           python3 frontends/android/build-support/verify_apk.py "$apk" \
             --ndk "$ANDROID_NDK_HOME" \
             --aapt2 "$ANDROID_HOME/build-tools/35.0.0/aapt2" \
             --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
-            --test-apk \
+            --expected-certificate-sha256 "$PH0NIX_UPGRADE_CERT_SHA256" \
             --report dist/k750i-android/apk-verification.json
           cp build/android/qemu/provenance.json dist/k750i-android/engine-provenance.json
           cd dist/k750i-android
-          sha256sum ph0nix-k750i-test-arm64.apk > ph0nix-k750i-test-arm64.apk.sha256
+          sha256sum ph0nix-k750i-arm64.apk > ph0nix-k750i-arm64.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: ph0nix-k750i-test-arm64
+          name: ph0nix-k750i-arm64
           path: dist/k750i-android/*
           if-no-files-found: error

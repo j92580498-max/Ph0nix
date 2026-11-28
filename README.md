@@ -47,5 +47,5 @@ In **Settings → MIDI SoundFont**, choose your own `.sf2` file (up to 128 MiB).
 
 ## K750i self-hosted tests
 
-In the original repository, assign the `ph0nix-owner` label to its Linux x64 self-hosted runner, then run **K750i internal storage** on `main` from the Actions tab. The workflow checks cold-boot storage and builds a verified `ph0nix-k750i-test-arm64` artifact. This APK installs separately from the regular app as `org.featurephone.emulator.test`.
+In the original repository, assign the `ph0nix-owner` label to its Linux x64 self-hosted runner, then run **K750i internal storage** on `main` from the Actions tab. The workflow checks cold-boot storage and builds `ph0nix-k750i-arm64.apk` with the standard application ID (`org.featurephone.emulator`). For in-place updates of existing K750i builds, the runner must already have the matching signing keystore in its Android user directory. The workflow verifies the signing certificate before building and before uploading the APK.
 
