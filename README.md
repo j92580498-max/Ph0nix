@@ -41,7 +41,7 @@ with native applications for Linux, Windows and Android.
 
 ![The five original K750i Settings tabs](docs/images/VideoCapture_20261116-071627.jpg)
 
-## Credits
+## K750i MIDI on Android
 
-The optional [Sony Ericsson A100 DB2020 Synth 1.0.5 SoundFont](https://musical-artifacts.com/artifacts/2351) was programmed and compiled by **Rubén Díaz (RibénDíaz232)** using samples recorded from a Sony Ericsson W580i. The SoundFont file is not included in the repository.
+In **Settings → MIDI SoundFont**, choose your own `.sf2` file (up to 128 MiB). The app keeps a private copy and uses it the next time you open a K750i. Use **Restore default MIDI sound** to remove it. A regular APK does not bundle a SoundFont; without one, MIDI uses the built-in synthesizer. When resuming a saved session, a track that was already playing uses the built-in synthesizer until the next track starts.
 

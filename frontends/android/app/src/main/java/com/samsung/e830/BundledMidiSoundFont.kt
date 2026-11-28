@@ -5,7 +5,7 @@ import android.util.AtomicFile
 import java.io.File
 
 internal object BundledMidiSoundFont {
-    private const val name = "sony-ericsson-db2020-1.0.5.sf2"
+    private const val name = "default.sf2"
 
     @Synchronized
     fun prepare(context: Context): String? {

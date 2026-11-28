@@ -95,6 +95,14 @@
     <string name="settings_display">Display</string>
     <string name="settings_show_fps">Show FPS</string>
     <string name="settings_sound">Sound</string>
+    <string name="midi_soundfont">MIDI SoundFont</string>
+    <string name="midi_soundfont_description">Choose a .sf2 file (up to 128 MiB). Changes apply the next time you open a K750i.</string>
+    <string name="midi_soundfont_choose">Choose SoundFont (.sf2)</string>
+    <string name="midi_soundfont_reset">Restore default MIDI sound</string>
+    <string name="midi_soundfont_custom">Custom SoundFont selected</string>
+    <string name="midi_soundfont_default">Using default MIDI sound</string>
+    <string name="midi_soundfont_import_failed">Could not import the SoundFont. Check that the .sf2 file is intact and no larger than 128 MiB.</string>
+    <string name="midi_soundfont_reset_failed">Could not restore the default MIDI sound.</string>
     <string name="settings_fullscreen">Open phone in fullscreen</string>
     <string name="settings_awake">Keep screen awake while running</string>
     <string name="settings_phone_state">Phone state</string>

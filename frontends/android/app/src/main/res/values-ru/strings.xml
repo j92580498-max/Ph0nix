@@ -95,6 +95,14 @@
     <string name="settings_display">Экран</string>
     <string name="settings_show_fps">Показывать FPS</string>
     <string name="settings_sound">Звук</string>
+    <string name="midi_soundfont">Банк звуков MIDI</string>
+    <string name="midi_soundfont_description">Выберите файл .sf2 размером до 128 МиБ. Изменения вступят в силу при следующем запуске K750i.</string>
+    <string name="midi_soundfont_choose">Выбрать банк звуков (.sf2)</string>
+    <string name="midi_soundfont_reset">Вернуть звук MIDI по умолчанию</string>
+    <string name="midi_soundfont_custom">Выбран пользовательский банк звуков</string>
+    <string name="midi_soundfont_default">Используется звук MIDI по умолчанию</string>
+    <string name="midi_soundfont_import_failed">Не удалось импортировать банк. Проверьте, что файл .sf2 не повреждён и занимает не больше 128 МиБ.</string>
+    <string name="midi_soundfont_reset_failed">Не удалось вернуть звук MIDI по умолчанию.</string>
     <string name="settings_fullscreen">Запускать телефон на весь экран</string>
     <string name="settings_awake">Не выключать экран во время эмуляции</string>
     <string name="settings_phone_state">Состояние телефона</string>

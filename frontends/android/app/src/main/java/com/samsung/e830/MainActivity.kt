@@ -60,6 +60,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var preferences: AppPreferences
     private lateinit var tabs: TabLayout
     private lateinit var languageButton: MaterialButton
+    private lateinit var midiSoundFontState: TextView
+    private lateinit var selectMidiSoundFontButton: MaterialButton
+    private lateinit var resetMidiSoundFontButton: MaterialButton
     private var entries = emptyList<FirmwareEntry>()
     private var query = ""
 
@@ -93,6 +96,10 @@ class MainActivity : AppCompatActivity() {
     private val importMemoryDocument = registerForActivityResult(
         ActivityResultContracts.OpenDocument(),
     ) { uri -> finishMemoryImport(uri) }
+
+    private val selectMidiSoundFont = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) updateMidiSoundFont(uri)
+    }
 
     private val importBootCard = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val id = pendingCardEntryId
@@ -303,6 +310,52 @@ class MainActivity : AppCompatActivity() {
         content.addView(settingSwitch(getString(R.string.settings_resume), preferences.resume) { preferences.resume = it })
         content.addView(infoText(getString(R.string.settings_resume_description)))
         content.addView(infoText(getString(R.string.settings_fps_description)))
+        content.addView(infoText(getString(R.string.midi_soundfont), true))
+        midiSoundFontState = infoText("")
+        content.addView(midiSoundFontState)
+        content.addView(infoText(getString(R.string.midi_soundfont_description)))
+        selectMidiSoundFontButton = MaterialButton(this).apply {
+            setText(R.string.midi_soundfont_choose)
+            isAllCaps = false
+            setOnClickListener { selectMidiSoundFont.launch(arrayOf("*/*")) }
+        }
+        content.addView(selectMidiSoundFontButton)
+        resetMidiSoundFontButton = MaterialButton(this).apply {
+            setText(R.string.midi_soundfont_reset)
+            isAllCaps = false
+            setOnClickListener { updateMidiSoundFont(null) }
+        }
+        content.addView(resetMidiSoundFontButton)
+        refreshMidiSoundFontSetting()
+    }
+
+    private fun refreshMidiSoundFontSetting() {
+        val installed = UserMidiSoundFont.path(this) != null
+        midiSoundFontState.setText(if (installed) R.string.midi_soundfont_custom else R.string.midi_soundfont_default)
+        selectMidiSoundFontButton.isEnabled = !busy
+        resetMidiSoundFontButton.isEnabled = !busy && installed
+    }
+
+    private fun updateMidiSoundFont(uri: Uri?) {
+        if (busy) return
+        setBusy(true)
+        lifecycleScope.launch {
+            val result = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (uri == null) {
+                        UserMidiSoundFont.clear(this@MainActivity)
+                    } else {
+                        requireNotNull(contentResolver.openInputStream(uri)).use { input ->
+                            UserMidiSoundFont.install(this@MainActivity, input)
+                        }
+                    }
+                }
+            }
+            setBusy(false)
+            if (result.isFailure) {
+                showMessage(getString(if (uri == null) R.string.midi_soundfont_reset_failed else R.string.midi_soundfont_import_failed))
+            }
+        }
     }
 
     private fun settingSwitch(label: String, checked: Boolean, change: (Boolean) -> Unit) = SwitchMaterial(this).apply {
@@ -701,6 +754,7 @@ class MainActivity : AppCompatActivity() {
         this.busy = busy
         importButton.isEnabled = !busy
         languageButton.isEnabled = !busy
+        refreshMidiSoundFontSetting()
         recycler.isEnabled = !busy
         recycler.alpha = if (busy) 0.55f else 1f
     }

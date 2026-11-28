@@ -27,21 +27,11 @@ The optional Android SoundFont renderer uses TinySoundFont under MIT. The
 exact revision and checksum are pinned in `build-support/build_qemu.py`;
 the license is packaged in `assets/licenses/TinySoundFont-MIT.txt`.
 
-### Sony Ericsson A100 DB2020 Synth 1.0.5
-
-SoundFont programming and compilation: **Rubén Díaz (RibénDíaz232)**,
-© 2022–2026. The bank is sampled from a Sony Ericsson W580i. Original synthesis
-and sound design: © 2001–2012 Sony Ericsson Mobile Communications AB.
-Download it from the [author’s Musical Artifacts page](https://musical-artifacts.com/artifacts/2351).
-The author allows use with attribution and asks that the file not be
-redistributed on other platforms without permission.
-
-For a personal test APK, build with `-Pph0nixTestApk=true` and
-`-Pph0nixMidiSoundFont=/absolute/path/Sony_Ericsson_A100_DB2020_Synth_1.0.5.sf2`.
-This installs as `org.featurephone.emulator.test`, alongside the regular app.
-The repository and regular APK do not include the bank. Without it, MIDI uses
-the existing triangle renderer. An in-progress track restored from a saved VM
-state uses that renderer until the next track starts.
+The repository and regular APK do not include a SoundFont. Users can import
+their own `.sf2` from Android settings. A personal test APK can optionally bundle
+a default bank with `-Pph0nixTestApk=true` and
+`-Pph0nixMidiSoundFont=/absolute/path/bank.sf2`. It installs as
+`org.featurephone.emulator.test`, alongside the regular app.
 
 ## PocketHLE Android library UI
 

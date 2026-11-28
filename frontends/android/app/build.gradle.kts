@@ -19,7 +19,7 @@ val prepareMidiAssets by tasks.registering(Sync::class) {
     if (midiSoundFont != null) {
         from(midiSoundFont) {
             into("midi")
-            rename { "sony-ericsson-db2020-1.0.5.sf2" }
+            rename { "default.sf2" }
         }
     }
 }

@@ -105,7 +105,7 @@ def main():
         'android_device_runtime_tested': False,
     }
     with tempfile.TemporaryDirectory(prefix='ph0nix-apk-') as temporary, zipfile.ZipFile(args.apk) as archive:
-        soundfont = 'assets/midi/sony-ericsson-db2020-1.0.5.sf2'
+        soundfont = 'assets/midi/default.sf2'
         if args.midi_soundfont:
             expected = hashlib.sha256(args.midi_soundfont.read_bytes()).hexdigest()
             actual = hashlib.sha256(archive.read(soundfont)).hexdigest()
