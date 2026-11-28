@@ -158,7 +158,7 @@ fn main() -> Result<()> {
     ensure!(args.next().is_none(), "Unexpected arguments");
     fs::create_dir_all(&workspace)?;
     let workspace = workspace.canonicalize()?;
-    let options = HostOptions { engine, data_dir: workspace.clone(), resume: true };
+    let options = HostOptions { engine, data_dir: workspace.clone(), resume: true, midi_soundfont: None };
     let card = CardImage::create(&workspace.join("card.img"), size)?;
     let seed = b"This file was placed on the card before boot.\r\n".repeat(140);
     let written = b"This file was written by the K750i firmware.\r\n".repeat(240);

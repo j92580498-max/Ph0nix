@@ -599,6 +599,16 @@
         "hw/arm/db2010.c": "336bb9f08d506d6347f391e994fed6837061b3a059b17a416804cec0850d008f",
         "hw/arm/meson.build": "e3c354a21ff3fcf68ed8f69e4b2ab07d0db11a56b9cb7a7bef7ad6163a501bf7"
       }
+    },
+    {
+      "path": "patches/0012-ph0nix-android-midi-soundfont.patch",
+      "sha256": "e51d841595f2bdee4a6617ecd894610fdbe0e8d57b925c7537a9f7b018bf7aa8",
+      "files": {
+        "hw/arm/db2010-checkpoint.c": "b1b4299b4eeb4eebc6328e01e026dd191f5ced5722c1a19914155f9b19c16d75",
+        "hw/arm/db2010-dsp-peer.c": "f133ecffeb4ddcd060ab71aa4f283a5353a96960cb9bfc0d8078b9c56a5f2af1",
+        "hw/arm/db2010-midi-stream.c": "f0c202f84935186419686df5476622baf8d389a19ed413c7fce7575519a864ab",
+        "hw/arm/db2010-midi-stream.h": "5d30166e969699fb5038c423e6aa0feca1808b6e7cfae300afdc145bfaadc6f3"
+      }
     }
   ],
   "original_fork_commit": "0e1b026cf74a271e04fecc8922998885e6c9181c"

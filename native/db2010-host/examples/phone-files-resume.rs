@@ -425,6 +425,7 @@ fn main() -> Result<()> {
         let workspace = state.parent().context("Boot workspace required")?.to_owned();
         let options = HostOptions {
             engine,
+            midi_soundfont: None,
             data_dir: workspace.clone(),
             resume: !cold_boot,
         };

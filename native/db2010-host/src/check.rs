@@ -70,7 +70,7 @@ fn main() -> Result<()> {
     let mut session=if let Some(checkpoint)=get("--checkpoint") {
         match prepared.take() {Some(prepared)=>Session::open_prepared(&engine,prepared,&checkpoint)?,None=>Session::open(&engine,&state,Some(&checkpoint))?}
     } else {
-        let options=HostOptions {engine,data_dir:data.clone(),resume:!args.iter().any(|arg|arg=="--no-resume")};
+        let options=HostOptions {engine,data_dir:data.clone(),resume:!args.iter().any(|arg|arg=="--no-resume"),midi_soundfont:None};
         match prepared.take() {Some(prepared)=>Session::start_prepared(&options,prepared)?,None=>Session::start(&options,&state)?}
     };
     let mut audio = if args.iter().any(|arg| arg == "--audio") {

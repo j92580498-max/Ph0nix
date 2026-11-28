@@ -53,18 +53,26 @@ def main():
     parser.add_argument('--readelf', default=shutil.which('llvm-readelf') or 'readelf')
     parser.add_argument('--reference-apk', type=Path)
     parser.add_argument('--expected-certificate-sha256')
+    parser.add_argument('--test-apk', action='store_true')
+    parser.add_argument('--midi-soundfont', type=Path)
     parser.add_argument('--report', required=True, type=Path)
     args = parser.parse_args()
+    if args.midi_soundfont and not args.test_apk:
+        parser.error('--midi-soundfont requires --test-apk')
     gradle = (ROOT / 'frontends/android/app/build.gradle.kts').read_text()
     version = re.search(r'versionName\s*=\s*"([^"]+)"', gradle).group(1)
+    application_id = 'org.featurephone.emulator.test' if args.test_apk else 'org.featurephone.emulator'
+    label = 'ph0nix Test' if args.test_apk else 'ph0nix'
+    if args.test_apk:
+        version += '-test'
     version_code = int(re.search(r'versionCode\s*=\s*(\d+)', gradle).group(1))
     badging = run([args.aapt2, 'dump', 'badging', args.apk])
     package = re.search(r"package: name='([^']+)' versionCode='([^']+)' versionName='([^']+)'", badging)
-    if not package or package.groups() != ('org.featurephone.emulator', str(version_code), version):
+    if not package or package.groups() != (application_id, str(version_code), version):
         raise RuntimeError('Packaged app identity/version differs from the source')
     if not re.search(r"(?:minSdkVersion|sdkVersion):'24'", badging) or "targetSdkVersion:'35'" not in badging:
         raise RuntimeError('Packaged Android API requirements differ')
-    if "application-label:'ph0nix'" not in badging:
+    if f"application-label:'{label}'" not in badging:
         raise RuntimeError('Packaged application label differs')
     certificates = signature(args.apksigner, args.apk)
     if args.expected_certificate_sha256 and certificates != [args.expected_certificate_sha256.lower()]:
@@ -85,6 +93,7 @@ def main():
         'artifact': args.apk.name,
         'version': version,
         'version_code': version_code,
+        'application_id': application_id,
         'apk_bytes': args.apk.stat().st_size,
         'apk_sha256': hashlib.sha256(args.apk.read_bytes()).hexdigest(),
         'min_android_api': 24,
@@ -96,6 +105,15 @@ def main():
         'android_device_runtime_tested': False,
     }
     with tempfile.TemporaryDirectory(prefix='ph0nix-apk-') as temporary, zipfile.ZipFile(args.apk) as archive:
+        soundfont = 'assets/midi/sony-ericsson-db2020-1.0.5.sf2'
+        if args.midi_soundfont:
+            expected = hashlib.sha256(args.midi_soundfont.read_bytes()).hexdigest()
+            actual = hashlib.sha256(archive.read(soundfont)).hexdigest()
+            if expected != actual:
+                raise RuntimeError('Bundled MIDI SoundFont differs from the requested input')
+            report['midi_soundfont_sha256'] = actual
+        elif any(name.startswith('assets/midi/') for name in archive.namelist()):
+            raise RuntimeError('Unexpected bundled MIDI assets')
         libraries = sorted(name for name in archive.namelist() if name.startswith('lib/') and name.endswith('.so'))
         if libraries != ['lib/arm64-v8a/libdb2010_engine.so', 'lib/arm64-v8a/libe830_android_jni.so']:
             raise RuntimeError('Unexpected native libraries or Android ABIs')

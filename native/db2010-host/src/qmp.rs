@@ -222,7 +222,7 @@ impl Session {
         Self::start_with_lease(options,&prepared.state,Some(prepared.lease),card,audio,diagnostics,files)
     }
     pub fn open_prepared(engine:&Path,prepared:crate::prepare::Prepared,checkpoint:&Path) -> Result<Self> {
-        Self::open_with_lease(engine,&prepared.state,Some(checkpoint),None,prepared.lease,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default())
+        Self::open_with_lease(engine,&prepared.state,Some(checkpoint),None,prepared.lease,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default(),None)
     }
     fn start_with_lease(options:&HostOptions,prepared:&Path,lease:Option<fs::File>,card:Option<&Path>,audio:AudioBuffer,diagnostics:DiagnosticsHandle,files:PhoneFiles) -> Result<Self> {
         let workspace=prepared.parent().context("prepared state directory")?;
@@ -251,7 +251,7 @@ impl Session {
         let temporary=workspace.join("state.json.pending");
         fs::write(&temporary,serde_json::to_vec_pretty(&state)?)?;
         atomic_replace(&temporary,prepared)?;
-        Self::open_with_lease(&options.engine,prepared,checkpoint.as_deref(),card,lease,audio,diagnostics,files)
+        Self::open_with_lease(&options.engine,prepared,checkpoint.as_deref(),card,lease,audio,diagnostics,files,options.midi_soundfont.as_deref())
     }
     fn lock(workspace:&Path) -> Result<fs::File> {
         let file=fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
@@ -261,9 +261,9 @@ impl Session {
     }
     pub fn open(engine:&Path,prepared:&Path,checkpoint:Option<&Path>) -> Result<Self> {
         let lease=Self::lock(prepared.parent().context("prepared state directory")?)?;
-        Self::open_with_lease(engine,prepared,checkpoint,None,lease,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default())
+        Self::open_with_lease(engine,prepared,checkpoint,None,lease,AudioBuffer::default(),DiagnosticsHandle::default(),PhoneFiles::default(),None)
     }
-    fn open_with_lease(engine:&Path,prepared:&Path,checkpoint:Option<&Path>,card:Option<&Path>,lease:fs::File,audio:AudioBuffer,diagnostics:DiagnosticsHandle,files:PhoneFiles) -> Result<Self> {
+    fn open_with_lease(engine:&Path,prepared:&Path,checkpoint:Option<&Path>,card:Option<&Path>,lease:fs::File,audio:AudioBuffer,diagnostics:DiagnosticsHandle,files:PhoneFiles,midi_soundfont:Option<&Path>) -> Result<Self> {
         ensure!(engine.is_file(),"Native DB2010 engine is missing: {}",engine.display());
         let workspace=prepared.parent().context("prepared state directory")?.to_owned();
         // Instruction-count timing is useful for research, but throttles the
@@ -297,6 +297,7 @@ impl Session {
         let display_transport=DisplayTransport::bind(diagnostics.clone())?;
         let serial_transport=SerialTransport::bind_in(files.clone(),&workspace)?;
         let mut command=Command::new(engine);
+        if let Some(path)=midi_soundfont {command.env("PH0NIX_MIDI_SOUNDFONT",path);}
         command.args(["-machine",&format!("db2010,research-guards=off,state={}",parameter(&launch_state)),
             "-accel","tcg,thread=single",
             "-nodefaults","-display","none","-monitor","none","-serial","none","-S",

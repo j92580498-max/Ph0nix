@@ -9,6 +9,20 @@ val generatedJniLibs = layout.buildDirectory.dir("generated/e830JniLibs")
 val nativeLibrary = layout.buildDirectory.file("generated/e830JniLibs/arm64-v8a/libe830_android_jni.so")
 val engineLibrary = layout.buildDirectory.file("generated/e830JniLibs/arm64-v8a/libdb2010_engine.so")
 val engineSupport = rootProject.projectDir.resolve("build-support")
+val testApk = providers.gradleProperty("ph0nixTestApk").map(String::toBoolean).getOrElse(false)
+val midiSoundFont = providers.gradleProperty("ph0nixMidiSoundFont").orNull?.let { file(it) }
+require(midiSoundFont == null || testApk) { "A private SoundFont requires -Pph0nixTestApk=true" }
+require(midiSoundFont == null || midiSoundFont.isFile) { "SoundFont file not found: $midiSoundFont" }
+val midiAssets = layout.buildDirectory.dir("generated/midiAssets")
+val prepareMidiAssets by tasks.registering(Sync::class) {
+    into(midiAssets)
+    if (midiSoundFont != null) {
+        from(midiSoundFont) {
+            into("midi")
+            rename { "sony-ericsson-db2020-1.0.5.sf2" }
+        }
+    }
+}
 val python = System.getenv("FEATUREPHONE_PYTHON") ?: "python3"
 val ndkRoot = System.getenv("ANDROID_NDK_HOME")
     ?: System.getenv("ANDROID_NDK_ROOT")
@@ -27,17 +41,23 @@ android {
         targetSdk = 35
         versionCode = 12
         versionName = "1.0.3"
+        resValue("string", "app_name", if (testApk) "ph0nix Test" else "ph0nix")
         ndk {
             abiFilters += listOf("arm64-v8a")
         }
     }
 
     sourceSets["main"].jniLibs.srcDir(generatedJniLibs)
+    if (midiSoundFont != null) sourceSets["main"].assets.srcDir(prepareMidiAssets)
     buildTypes {
         getByName("release") {
             // A development certificate makes standalone builds installable.
             // Published builds retain the project's existing upgrade certificate.
             signingConfig = signingConfigs.getByName("debug")
+        }
+        if (testApk) configureEach {
+            applicationIdSuffix = ".test"
+            versionNameSuffix = "-test"
         }
     }
     packaging {
@@ -103,7 +123,7 @@ val buildDb2010Engine by tasks.registering(Exec::class) {
 }
 
 tasks.named("preBuild") {
-    dependsOn(buildDb2010Engine, buildE830Native)
+    dependsOn(buildDb2010Engine, buildE830Native, prepareMidiAssets)
 }
 
 dependencies {

@@ -36,6 +36,8 @@ HASHES = {
     'pcre2-10.46': '15fbc5aba6beee0b17aecb04602ae39432393aba1ebd8e39b7cabf7db883299f',
     'glib-2.84.4': '8a9ea10943c36fc117e253f80c91e477b673525ae45762942858aef57631bb90',
 }
+TSF_URL = 'https://raw.githubusercontent.com/schellingb/TinySoundFont/a3621a19c6504885cd9583e6e26c35bc954fc8ec/tsf.h'
+TSF_SHA256 = '70d55963c98f60ebb81518eaa1f25d46888d5180eb5f5289fd6b74ffc177d197'
 
 
 def run(argv, cwd, env):
@@ -99,7 +101,7 @@ def setup_tools(ndk, build, clang):
     return tool, prefix, cross, env
 
 
-def source(name, url, build):
+def download(name, url, sha256, build):
     downloads=build/'downloads'; downloads.mkdir(exist_ok=True)
     file=downloads/url.rsplit('/',1)[1]
     if not file.is_file():
@@ -109,8 +111,8 @@ def source(name, url, build):
             try:
                 with urllib.request.urlopen(candidate, timeout=12) as response, partial.open('wb') as output:
                     shutil.copyfileobj(response, output)
-                if hashlib.sha256(partial.read_bytes()).hexdigest() != HASHES[name]:
-                    raise ValueError('archive checksum differs')
+                if hashlib.sha256(partial.read_bytes()).hexdigest() != sha256:
+                    raise ValueError('checksum differs')
                 partial.replace(file)
                 break
             except (urllib.error.URLError, TimeoutError, ValueError) as error:
@@ -119,13 +121,18 @@ def source(name, url, build):
                 partial.unlink(missing_ok=True)
         else:
             raise RuntimeError('Could not download a verified Android dependency: ' + name)
-    if hashlib.sha256(file.read_bytes()).hexdigest()!=HASHES[name]:
-        raise ValueError('Android dependency archive identity differs: '+name)
+    if hashlib.sha256(file.read_bytes()).hexdigest()!=sha256:
+        raise ValueError('Android dependency identity differs: '+name)
+    return file, {'url':url,'sha256':sha256,'bytes':file.stat().st_size}
+
+
+def source(name, url, build):
+    file, identity = download(name, url, HASHES[name], build)
     directory=build/'sources'/name
     if not directory.is_dir():
         directory.parent.mkdir(exist_ok=True)
         with tarfile.open(file) as archive: archive.extractall(directory.parent,filter='data')
-    return directory, {'url':url,'sha256':hashlib.sha256(file.read_bytes()).hexdigest(),'bytes':file.stat().st_size}
+    return directory, identity
 
 
 def main():
@@ -146,6 +153,7 @@ def main():
     provenance={'created_unix':time.time(),'ndk':str(args.ndk.resolve()),'sources':{},'engine_source':
         revision, 'engine_patches':lock.get('patches', []),
         'source_lock_sha256':hashlib.sha256(lock_path.read_bytes()).hexdigest()}
+    tsf_header, provenance['sources']['TinySoundFont'] = download('TinySoundFont', TSF_URL, TSF_SHA256, args.build)
     for name,url in SOURCES.items():
         directory,identity=source(name,url,args.build); provenance['sources'][name]=identity
         marker=args.build/(name+'.built')
@@ -190,7 +198,8 @@ def main():
                 '--disable-vhost-crypto','--disable-vhost-vdpa','--disable-vhost-user-blk-server',
                 '--cross-prefix='+str(tool)+'/', '--cpu=aarch64', '--enable-pie',
                 '--disable-debug-info','--cc='+str(tool/'cc'),'--cxx='+str(tool/'cxx'),
-                '--host-cc=cc','--extra-cflags=-I'+str(prefix/'include')+' -include '+str(support/'android_compat.h'),
+                '--host-cc=cc','--extra-cflags=-I'+str(prefix/'include')+' -include '+str(support/'android_compat.h')+
+                ' -DCONFIG_DB2010_SOUNDFONT -isystem '+str(tsf_header.parent),
                 '--extra-ldflags=-L'+str(prefix/'lib')+' -liconv '+str(compat)]
     configuration={'options':options,'compiler_sha256':hashlib.sha256((tool/'cc').read_bytes()).hexdigest()}
     config_file=target/'android-config.json'

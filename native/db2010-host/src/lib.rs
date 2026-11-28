@@ -15,6 +15,7 @@ use std::path::{Path, PathBuf};
 #[derive(Clone, Debug)]
 pub struct HostOptions {
     pub engine: PathBuf,
+    pub midi_soundfont: Option<PathBuf>,
     pub data_dir: PathBuf,
     pub resume: bool,
 }
@@ -41,7 +42,7 @@ impl HostOptions {
             bail!("The native DB2010 engine is missing. Build QEMU or set FEATUREPHONE_QEMU to qemu-system-arm.");
         };
         let data_dir = Self::app_data(root);
-        Ok(Self { engine, data_dir, resume: true })
+        Ok(Self { engine, data_dir, resume: true, midi_soundfont: None })
     }
 }
 

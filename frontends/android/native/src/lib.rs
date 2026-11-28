@@ -453,10 +453,13 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeTakeFrame<'local
 #[no_mangle]
 pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeConfigure<'local>(
     mut env:JNIEnv<'local>, _this:JObject<'local>, engine:JString<'local>, data:JString<'local>, resume:jboolean,
+    midi_soundfont:JString<'local>,
 ) {
     let result=(|| -> Result<(),String> {
+        let midi_soundfont=read_string(&mut env,&midi_soundfont)?;
         let options=HostOptions {engine:read_string(&mut env,&engine)?.into(),
-            data_dir:read_string(&mut env,&data)?.into(),resume:resume!=0};
+            data_dir:read_string(&mut env,&data)?.into(),resume:resume!=0,
+            midi_soundfont:(!midi_soundfont.is_empty()).then(||midi_soundfont.into())};
         *HOST.get_or_init(||Mutex::new(None)).lock().map_err(|e|e.to_string())?=Some(options);
         Ok(())
     })();
