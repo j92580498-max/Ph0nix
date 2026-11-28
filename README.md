@@ -41,3 +41,7 @@ with native applications for Linux, Windows and Android.
 
 ![The five original K750i Settings tabs](docs/images/VideoCapture_20261116-071627.jpg)
 
+## Credits
+
+The optional [Sony Ericsson A100 DB2020 Synth 1.0.5 SoundFont](https://musical-artifacts.com/artifacts/2351) was programmed and compiled by **Rubén Díaz (RibénDíaz232)** using samples recorded from a Sony Ericsson W580i. The SoundFont file is not included in the repository.
+
