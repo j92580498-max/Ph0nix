@@ -9,6 +9,12 @@ DB2010 QEMU engine and native host: GPL-2.0-or-later. GLib: LGPL-2.1-or-later. l
 OpenCORE AMR-NB decoder: Apache-2.0, derived from the Google Android OpenCORE project. Selected sources from BelledonneCommunications/opencore-amr revision 3b67218fb8efb776bcd79e7445774e02d778321d.
 AndroidX, Material Components and Kotlin retain their upstream licenses.
 Native FAT16 images: fatfs 0.3.6, MIT. OBEX XML listings: quick-xml 0.41.0, MIT.
-K750i MIDI sample synthesis: TinySoundFont, MIT. The optional Sony Ericsson A100 DB2020 Synth 1.0.5 bank is by Rubén Díaz (RibénDíaz232), sampled from a Sony Ericsson W580i. https://musical-artifacts.com/artifacts/2351
+K750i MIDI sample synthesis: TinySoundFont, MIT.
+
+Optional SoundFont: Sony Ericsson A100 DB2020 Synth 1.0.5
+SoundFont programming and compilation: © 2022–2026 Rubén Díaz (RibénDíaz232).
+Samples recorded from a Sony Ericsson W580i.
+Original synthesis and sound design: © 2001–2012 Sony Ericsson Mobile Communications AB.
+Author's download page: https://musical-artifacts.com/artifacts/2351
 
 License texts are included in assets/licenses. Build inputs, exact source revisions and build instructions are provided in the project source. Imported MAIN/FS firmware is supplied by the user.
