@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
-//! Raw FAT16 removable-card images. The app can browse these images; the
-//! K750 Memory Stick bus requires a separately implemented controller.
+//! Raw FAT16 removable-card images and exclusive host-side file operations.
 use super::{digest, obex::validate_path, FileEntry, MAX_FILE_BYTES, NONCE};
-use anyhow::{bail, ensure, Context, Result};
+use anyhow::{ensure, Context, Result};
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -16,10 +15,10 @@ use std::{
 pub struct CardInfo {
     pub path: PathBuf,
     pub size_bytes: u64,
+    pub capacity_bytes: u64,
+    pub used_bytes: u64,
     pub free_bytes: u64,
     pub filesystem: String,
-    pub guest_mounted: bool,
-    pub guest_mount_supported: bool,
 }
 #[derive(Clone, Debug)]
 pub struct CardImage {
@@ -116,8 +115,8 @@ impl CardImage {
             .map_err(|e| anyhow::anyhow!("Card image is in use: {e}"))?;
         let size = file.metadata()?.len();
         ensure!(
-            (16 * 1024 * 1024..=1024 * 1024 * 1024).contains(&size) && size % 512 == 0,
-            "Unsupported raw card image size"
+            (16 * 1024 * 1024..=1024 * 1024 * 1024).contains(&size) && size % (32 * 1024) == 0,
+            "Card image must be 16 MiB to 1 GiB and aligned to 32 KiB"
         );
         let mut boot = [0; 512];
         file.read_exact(&mut boot)?;
@@ -153,13 +152,16 @@ impl CardImage {
     pub fn info(&self) -> Result<CardInfo> {
         self.with_fs(|fs, size| {
             let stats = fs.stats()?;
+            let cluster_bytes = u64::from(stats.cluster_size());
+            let capacity_bytes = u64::from(stats.total_clusters()) * cluster_bytes;
+            let free_bytes = u64::from(stats.free_clusters()) * cluster_bytes;
             Ok(CardInfo {
                 path: self.path.clone(),
                 size_bytes: size,
-                free_bytes: stats.free_clusters() as u64 * stats.cluster_size() as u64,
+                capacity_bytes,
+                used_bytes: capacity_bytes - free_bytes,
+                free_bytes,
                 filesystem: "FAT16".into(),
-                guest_mounted: false,
-                guest_mount_supported: false,
             })
         })
     }
@@ -324,9 +326,6 @@ impl CardImage {
             Ok(())
         })
     }
-    pub fn mount_in_phone(&self) -> Result<()> {
-        bail!("K750 uses Memory Stick Duo; its card controller is not implemented yet. This FAT16 image can be managed in the app and transferred to phone storage.")
-    }
 }
 
 fn write_verified(
@@ -343,6 +342,11 @@ fn write_verified(
     );
     let present = exists(fs, destination)?;
     ensure!(replace || !present, "Card destination already exists");
+    let stats = fs.stats()?;
+    ensure!(
+        identity.0 <= u64::from(stats.free_clusters()) * u64::from(stats.cluster_size()),
+        "Not enough free space on the Memory Stick"
+    );
     let staged = temp_name(parent);
     ensure!(!exists(fs, &staged)?, "Staging filename collision");
     let root = fs.root_dir();
@@ -432,11 +436,58 @@ mod tests {
         p.split('/').map(String::from).collect()
     }
     #[test]
+    fn capacity_tracks_fat_allocation_and_excludes_metadata() {
+        let dir = WorkDir::new();
+        let source = dir.0.join("source");
+        fs::write(&source, [42]).unwrap();
+        for size_mib in [32, 64] {
+            let card = CardImage::create(&dir.0.join(format!("{size_mib}.img")), size_mib).unwrap();
+            let empty = card.info().unwrap();
+            assert_eq!(empty.size_bytes, size_mib * 1024 * 1024);
+            assert!(empty.capacity_bytes < empty.size_bytes);
+            assert_eq!(empty.capacity_bytes, empty.free_bytes);
+            assert_eq!(empty.used_bytes, 0);
+            let cluster = card
+                .with_fs(|fs, _| Ok(u64::from(fs.stats()?.cluster_size())))
+                .unwrap();
+            let target = path("data.bin");
+            card.import_file(&target, &source, false, false).unwrap();
+            let reopened = CardImage::open(card.path()).unwrap();
+            let occupied = reopened.info().unwrap();
+            assert_eq!(occupied.capacity_bytes, empty.capacity_bytes);
+            assert_eq!(occupied.used_bytes, cluster);
+            assert_eq!(occupied.free_bytes + cluster, empty.free_bytes);
+            reopened.delete(&target).unwrap();
+            assert_eq!(reopened.info().unwrap().free_bytes, empty.free_bytes);
+            println!(
+                "{size_mib} MiB image: {} FAT data bytes, {cluster} bytes per cluster",
+                empty.capacity_bytes
+            );
+        }
+    }
+    #[test]
+    fn full_card_rejects_an_import_without_changing_contents() {
+        let dir = WorkDir::new();
+        let card = CardImage::create(&dir.0.join("card.img"), 16).unwrap();
+        let source = dir.0.join("source");
+        let capacity = card.info().unwrap().capacity_bytes;
+        fs::File::create(&source).unwrap().set_len(capacity).unwrap();
+        card.import_file(&path("full.bin"), &source, false, false).unwrap();
+        assert_eq!(card.info().unwrap().free_bytes, 0);
+        fs::write(&source, [42]).unwrap();
+        let error = card.import_file(&path("overflow.bin"), &source, false, false).unwrap_err();
+        assert!(error.to_string().contains("Not enough free space"));
+        let entries = card.list(&[]).unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].name, "full.bin");
+        assert_eq!(entries[0].size, Some(capacity));
+        assert_eq!(card.info().unwrap().free_bytes, 0);
+    }
+    #[test]
     fn card_survives_reopen_and_verified_moves() {
         let dir = WorkDir::new();
         let card = CardImage::create(&dir.0.join("card.img"), 16).unwrap();
         assert_eq!(card.info().unwrap().filesystem, "FAT16");
-        assert!(!card.info().unwrap().guest_mounted);
         card.make_directory(&path("Music")).unwrap();
         let source = dir.0.join("source.bin");
         let bytes: Vec<u8> = (0..100000).map(|n| (n * 37) as u8).collect();

@@ -1,5 +1,6 @@
 package com.samsung.e830
 
+import android.content.Context
 import org.json.JSONArray
 
 internal data class FileRole(val role: String, val extensions: Set<String>, val required: Boolean)
@@ -12,7 +13,17 @@ internal data class DeviceProfile(
     val displayHeight: Int,
     val selectionHint: String,
     val support: String,
-)
+) {
+    fun selectionHint(context: Context): String = when (id) {
+        "k750i" -> context.getString(R.string.k750_selection_hint)
+        else -> selectionHint
+    }
+
+    fun support(context: Context): String = when (id) {
+        "k750i" -> context.getString(R.string.k750_support)
+        else -> support
+    }
+}
 
 // The native registry supplies phone identities, file formats and LCD dimensions.
 internal object DeviceProfiles {

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 //! Live phone file operations and portable removable FAT images.
 pub mod card;
+pub mod internal;
 pub mod obex;
 pub use card::{CardImage, CardInfo};
 
@@ -47,6 +48,10 @@ pub enum FileRequest {
         #[serde(default)]
         move_source: bool,
     },
+    ImportInternal {
+        name: String,
+        host: PathBuf,
+    },
     Export {
         path: Vec<String>,
         host: PathBuf,
@@ -78,7 +83,7 @@ impl FileRequest {
     fn operation(&self) -> &'static str {
         match self {
             Self::List { .. } => "list",
-            Self::Import { .. } => "import",
+            Self::Import { .. } | Self::ImportInternal { .. } => "import",
             Self::Export { .. } => "export",
             Self::Copy {
                 move_source: true, ..
@@ -96,6 +101,11 @@ impl FileRequest {
             Self::Import { path, host, .. } | Self::Export { path, host, .. } => {
                 validate_path(path)?;
                 ensure!(!path.is_empty(), "File name required");
+                ensure!(!host.as_os_str().is_empty(), "Host file path required");
+                Ok(())
+            }
+            Self::ImportInternal { name, host } => {
+                validate_path(std::slice::from_ref(name))?;
                 ensure!(!host.as_os_str().is_empty(), "Host file path required");
                 Ok(())
             }
@@ -150,6 +160,7 @@ pub struct FileJob {
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct FileSnapshot {
     pub attached: bool,
+    pub serial_ready: bool,
     pub connected: bool,
     pub busy: bool,
     pub path: Vec<String>,
@@ -199,6 +210,9 @@ impl PhoneFiles {
             .lock()
             .unwrap_or_else(|e| e.into_inner())
             .clone()
+    }
+    pub fn observe_serial(&self, cable_present: bool, input_ready: bool) {
+        self.update(|state| state.serial_ready = cable_present && (state.serial_ready || input_ready));
     }
     pub fn pending_commit(&self) -> bool {
         self.inner
@@ -486,10 +500,12 @@ impl SerialTransport {
                         }
                     });
                     let result = (|| {
-                        if !matches!(request, FileRequest::Disconnect) {
-                            client.connect(false)?;
-                            thread_files.update(|s| s.connected = true);
+                        match &request {
+                            FileRequest::ImportInternal { .. } => client.connect_when_ready()?,
+                            FileRequest::Disconnect => {}
+                            _ => client.connect(false)?,
                         }
+                        thread_files.update(|s| s.connected = client.is_connected());
                         perform(&mut client, &request, &thread_files, &temporary)
                     })();
                     let awaiting_save = result.is_ok() && thread_files.pending_commit();
@@ -669,6 +685,62 @@ fn existing<T: Read + Write>(client: &mut ObexClient<T>, path: &[String]) -> Res
         .iter()
         .any(|entry| entry.name.eq_ignore_ascii_case(name)))
 }
+/// Locate K750i's internal Other directory using the firmware's own listing.
+pub fn internal_other_path(
+    mut list: impl FnMut(&[String]) -> Result<Vec<FileEntry>>,
+) -> Result<Vec<String>> {
+    fn folder<'a>(entries: &'a [FileEntry], names: &[&str]) -> Option<&'a str> {
+        entries
+            .iter()
+            .find(|entry| {
+                entry.directory
+                    && names.iter().any(|name| entry.name.to_lowercase() == name.to_lowercase())
+            })
+            .map(|entry| entry.name.as_str())
+    }
+
+    let root = list(&[])?;
+    let names = ["Other", "Прочее", "Другое"];
+    if let Some(memory) = folder(&root, &["Phone memory", "Память телефона"]) {
+        let mut path = vec![memory.to_owned()];
+        let entries = list(&path)?;
+        let other = folder(&entries, &names).context("No Other directory in phone memory")?;
+        path.push(other.to_owned());
+        Ok(path)
+    } else {
+        // Without a separate phone memory container, user folders appear at the root.
+        let other = folder(&root, &names).context("No internal Other directory in OBEX root")?;
+        Ok(vec![other.to_owned()])
+    }
+}
+
+fn import_file<T: Read + Write>(
+    client: &mut ObexClient<T>,
+    files: &PhoneFiles,
+    path: &[String],
+    host: &Path,
+    replace: bool,
+    move_source: bool,
+) -> Result<()> {
+    use std::io::{Seek, SeekFrom};
+    let mut source = fs::File::open(host)?;
+    ensure!(source.metadata()?.is_file(), "Choose a regular file");
+    let identity = digest(&mut source)?;
+    if !replace {
+        ensure!(
+            !existing(client, path)?,
+            "Phone file already exists; choose another name or enable replace"
+        );
+    }
+    source.seek(SeekFrom::Start(0))?;
+    client.put(path, &mut source, identity.0, |n, t| files.progress(n, t))?;
+    verify_remote(client, path, identity)?;
+    if move_source {
+        files.defer_source_delete(host, identity)?;
+    }
+    Ok(())
+}
+
 fn perform<T: Read + Write>(
     client: &mut ObexClient<T>,
     request: &FileRequest,
@@ -690,21 +762,12 @@ fn perform<T: Read + Write>(
             replace,
             move_source,
         } => {
-            let mut source = fs::File::open(host)?;
-            ensure!(source.metadata()?.is_file(), "Choose a regular file");
-            let identity = digest(&mut source)?;
-            if !replace {
-                ensure!(
-                    !existing(client, path)?,
-                    "Phone file already exists; choose another name or enable replace"
-                );
-            }
-            source.seek(SeekFrom::Start(0))?;
-            client.put(path, &mut source, identity.0, |n, t| files.progress(n, t))?;
-            verify_remote(client, path, identity)?;
-            if *move_source {
-                files.defer_source_delete(host, identity)?;
-            }
+            import_file(client, files, path, host, *replace, *move_source)?;
+        }
+        FileRequest::ImportInternal { name, host } => {
+            let mut path = internal_other_path(|path| client.list(path))?;
+            path.push(name.clone());
+            import_file(client, files, &path, host, false, true)?;
         }
         FileRequest::Export {
             path,
@@ -834,6 +897,44 @@ mod tests {
             r#"{"operation":"delete","path":[],"typo":true}"#
         )
         .is_err());
+    }
+
+    fn directories(names: &[&str]) -> Vec<FileEntry> {
+        names.iter().map(|name| FileEntry {
+            name: (*name).into(),
+            directory: true,
+            size: None,
+            modified: None,
+        }).collect()
+    }
+
+    #[test]
+    fn internal_other_is_found_at_the_root_without_a_memory_container() {
+        let path = internal_other_path(|path| {
+            assert!(path.is_empty());
+            Ok(directories(&["Pictures", "Other"]))
+        }).unwrap();
+        assert_eq!(path, ["Other"]);
+    }
+
+    #[test]
+    fn internal_other_uses_the_localized_phone_container_and_ignores_card_folders() {
+        let path = internal_other_path(|path| match path {
+            [] => Ok(directories(&["Memory Stick", "ПАМЯТЬ ТЕЛЕФОНА", "Other"])),
+            [memory] if memory == "ПАМЯТЬ ТЕЛЕФОНА" => Ok(directories(&["Прочее"])),
+            _ => panic!("Unexpected listing of {}", path.join("/")),
+        }).unwrap();
+        assert_eq!(path, ["ПАМЯТЬ ТЕЛЕФОНА", "Прочее"]);
+    }
+
+    #[test]
+    fn internal_other_never_falls_back_to_the_card() {
+        let error = internal_other_path(|path| match path {
+            [] => Ok(directories(&["Memory Stick", "Phone memory", "Other"])),
+            [memory] if memory == "Phone memory" => Ok(directories(&["Pictures"])),
+            _ => panic!("Unexpected listing of {}", path.join("/")),
+        }).unwrap_err();
+        assert_eq!(error.to_string(), "No Other directory in phone memory");
     }
 
     #[test]

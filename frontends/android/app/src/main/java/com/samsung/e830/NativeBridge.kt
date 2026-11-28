@@ -13,7 +13,11 @@ internal object NativeBridge {
     external fun nativeSetKeys(handle: Long, mask: Int)
     external fun nativeKeyBindings(device: String): String
     external fun nativeValidateSelection(selection: String): String
-    external fun nativeStartSelection(selection: String): Long
+    external fun nativeCreateInternalMemory(selection: String, workspace: String): String
+    external fun nativeTransferInternalMemory(
+        selection: String, dataDirectory: String, workspace: String, file: String, importing: Boolean,
+    ): String
+    external fun nativeStartSelection(selection: String, workspace: String, card: String): Long
     external fun nativePollStatus(handle: Long): String
     external fun nativeTakeFrame(handle: Long): ByteArray?
     external fun nativeTakeAudio(handle: Long): ByteArray?
@@ -34,7 +38,11 @@ internal object NativeBridge {
     external fun nativeBluetoothReceiverTake(handle: Long): String
     external fun nativeBluetoothReceiverClose(handle: Long)
     external fun nativeCardRequest(request: String): String
+    external fun nativeInternalFileRequest(
+        selection: String, dataDirectory: String, workspace: String, request: String,
+    ): String
     external fun nativeIsRunning(handle: Long): Boolean
-    external fun nativeStop(handle: Long)
+    external fun nativeSetPaused(handle: Long, paused: Boolean)
+    external fun nativeStop(handle: Long): String
     external fun nativeDestroy(handle: Long)
 }

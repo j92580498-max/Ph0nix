@@ -52,6 +52,7 @@ def main():
     parser.add_argument('--apksigner', default='apksigner')
     parser.add_argument('--readelf', default=shutil.which('llvm-readelf') or 'readelf')
     parser.add_argument('--reference-apk', type=Path)
+    parser.add_argument('--expected-certificate-sha256')
     parser.add_argument('--report', required=True, type=Path)
     args = parser.parse_args()
     gradle = (ROOT / 'frontends/android/app/build.gradle.kts').read_text()
@@ -66,8 +67,15 @@ def main():
     if "application-label:'ph0nix'" not in badging:
         raise RuntimeError('Packaged application label differs')
     certificates = signature(args.apksigner, args.apk)
-    if args.reference_apk and certificates != signature(args.apksigner, args.reference_apk):
-        raise RuntimeError('Signing certificate changed: in-place upgrade would fail')
+    if args.expected_certificate_sha256 and certificates != [args.expected_certificate_sha256.lower()]:
+        raise RuntimeError('APK is not signed with the expected upgrade certificate')
+    if args.reference_apk:
+        reference_badging = run([args.aapt2, 'dump', 'badging', args.reference_apk])
+        reference = re.search(r"package: name='([^']+)' versionCode='([^']+)'", reference_badging)
+        if not reference or reference[1] != package[1] or int(reference[2]) > version_code:
+            raise RuntimeError('Reference APK package or version is incompatible with an in-place upgrade')
+        if certificates != signature(args.apksigner, args.reference_apk):
+            raise RuntimeError('Signing certificate changed: in-place upgrade would fail')
 
     bridge = (ROOT / 'frontends/android/app/src/main/java/com/samsung/e830/NativeBridge.kt').read_text()
     jni_names = {'Java_com_samsung_e830_NativeBridge_' + name
@@ -83,7 +91,7 @@ def main():
         'target_android_api': 35,
         'signing_certificate_sha256': certificates,
         'signature_v2_verified': True,
-        'upgrade_certificate_verified': bool(args.reference_apk),
+        'upgrade_certificate_verified': bool(args.reference_apk or args.expected_certificate_sha256),
         'native_libraries': {},
         'android_device_runtime_tested': False,
     }
@@ -92,7 +100,7 @@ def main():
         if libraries != ['lib/arm64-v8a/libdb2010_engine.so', 'lib/arm64-v8a/libe830_android_jni.so']:
             raise RuntimeError('Unexpected native libraries or Android ABIs')
         dex = b''.join(archive.read(name) for name in archive.namelist() if re.fullmatch(r'classes\d*\.dex', name))
-        for name in ('MainActivity', 'EmulatorActivity', 'DeveloperPanel', 'PhoneFilePanel', 'BluetoothBridge'):
+        for name in ('MainActivity', 'EmulatorActivity', 'DeveloperPanel', 'PhoneDocumentsProvider', 'BluetoothBridge'):
             if f'Lcom/samsung/e830/{name};'.encode() not in dex:
                 raise RuntimeError(f'Missing packaged Android class: {name}')
         for member in libraries:

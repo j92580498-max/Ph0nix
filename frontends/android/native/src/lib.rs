@@ -14,6 +14,7 @@ struct Session {
     frame: Option<GuestFrame>,
     status: String,
     finished: bool,
+    failed: bool,
 }
 
 enum GuestFrame { Rgb(Frame), Rgb565(LcdFrame) }
@@ -52,7 +53,7 @@ fn new_string(env: &mut JNIEnv<'_>, value: &str) -> jstring {
         .unwrap_or(std::ptr::null_mut())
 }
 
-fn start_selection(selection: FirmwareSelection) -> Result<jlong, String> {
+fn start_selection(selection: FirmwareSelection, workspace: Option<PathBuf>, card: Option<PathBuf>) -> Result<jlong, String> {
     let registry = k750_native::registry();
     let name = registry
         .device(&selection.device)
@@ -60,12 +61,13 @@ fn start_selection(selection: FirmwareSelection) -> Result<jlong, String> {
         .info()
         .name;
     let options=HOST.get_or_init(||Mutex::new(None)).lock().map_err(|e|e.to_string())?.clone();
-    let worker = Worker::start_with_options(selection,options).map_err(|error| error.to_string())?;
+    let worker = Worker::start_with_card(selection, options, workspace, card).map_err(|error| error.to_string())?;
     Ok(Box::into_raw(Box::new(Mutex::new(Session {
         worker,
         frame: None,
         status: format!("Starting {name} firmware…"),
         finished: false,
+        failed: false,
     }))) as jlong)
 }
 
@@ -121,16 +123,98 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeValidateSelectio
     new_string(&mut env, &result.err().unwrap_or_default())
 }
 
+fn memory_selection(selection: &FirmwareSelection) -> Result<&PathBuf, String> {
+    if selection.device != "k750i" {
+        return Err("This memory format is only supported for K750i.".into());
+    }
+    selection.files.companions.get("fs").ok_or_else(|| "Select the matching K750i FS.".into())
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeCreateInternalMemory<'local>(
+    mut env: JNIEnv<'local>, _this: JObject<'local>, json: JString<'local>, workspace: JString<'local>,
+) -> jstring {
+    let result = (|| -> Result<(), String> {
+        let selection: FirmwareSelection = serde_json::from_str(&read_string(&mut env, &json)?)
+            .map_err(|error| error.to_string())?;
+        db2010_host::prepare::create_internal_memory(
+            &selection.files.image, memory_selection(&selection)?, &path(read_string(&mut env, &workspace)?),
+        ).map_err(|error| format!("{error:#}"))
+    })();
+    new_string(&mut env, &result.err().unwrap_or_default())
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeTransferInternalMemory<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+    json: JString<'local>,
+    data_directory: JString<'local>,
+    workspace: JString<'local>,
+    file: JString<'local>,
+    importing: jboolean,
+) -> jstring {
+    let result = (|| -> Result<(), String> {
+        let workspace = internal_workspace(&mut env, &json, &data_directory, &workspace)?;
+        let file = path(read_string(&mut env, &file)?);
+        if importing != 0 {
+            db2010_host::qmp::import_internal_memory(&workspace, &file)
+        } else {
+            db2010_host::qmp::export_internal_memory(&workspace, &file)
+        }.map_err(|error| format!("{error:#}"))
+    })();
+    new_string(&mut env, &result.err().unwrap_or_default())
+}
+
+fn internal_workspace(
+    env: &mut JNIEnv<'_>, selection: &JString<'_>, data_directory: &JString<'_>, workspace: &JString<'_>,
+) -> Result<PathBuf, String> {
+    let selection: FirmwareSelection = serde_json::from_str(&read_string(env, selection)?)
+        .map_err(|error| error.to_string())?;
+    let fs = memory_selection(&selection)?;
+    let workspace = read_string(env, workspace)?;
+    if workspace.is_empty() {
+        db2010_host::prepare::workspace(&selection.files.image, fs, &path(read_string(env, data_directory)?))
+            .map_err(|error| format!("{error:#}"))
+    } else {
+        Ok(path(workspace))
+    }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeInternalFileRequest<'local>(
+    mut env: JNIEnv<'local>, _this: JObject<'local>, selection: JString<'local>,
+    data_directory: JString<'local>, workspace: JString<'local>, request: JString<'local>,
+) -> jstring {
+    use db2010_host::storage::internal;
+    use serde_json::json;
+    let result = (|| -> Result<serde_json::Value, String> {
+        let workspace = internal_workspace(&mut env, &selection, &data_directory, &workspace)?;
+        let request = serde_json::from_str(&read_string(&mut env, &request)?).map_err(|error| error.to_string())?;
+        Ok(match internal::request(&workspace, request) {
+            Ok(response) => response,
+            Err(error) => json!({"error":format!("{error:#}"), "running":error.is::<internal::InUse>()}),
+        })
+    })();
+    let response = result.unwrap_or_else(|error| json!({"error":error}));
+    new_string(&mut env, &response.to_string())
+}
+
 #[no_mangle]
 pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStartSelection<'local>(
     mut env: JNIEnv<'local>,
     _this: JObject<'local>,
     json: JString<'local>,
+    workspace: JString<'local>,
+    card: JString<'local>,
 ) -> jlong {
     let result = (|| -> Result<jlong, String> {
         let selection = serde_json::from_str(&read_string(&mut env, &json)?)
             .map_err(|error| error.to_string())?;
-        start_selection(selection)
+        let workspace = read_string(&mut env, &workspace)?;
+        let card = read_string(&mut env, &card)?;
+        start_selection(selection, (!workspace.is_empty()).then(|| path(workspace)),
+            (!card.is_empty()).then(|| path(card)))
     })();
     match result {
         Ok(handle) => handle,
@@ -279,7 +363,7 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStart<'local>(
             read_string(&mut env, &tfs)?,
             read_string(&mut env, &onenand)?,
         )?;
-        start_selection(paths.into())
+        start_selection(paths.into(), None, None)
     })();
     match result {
         Ok(handle) => handle,
@@ -300,6 +384,11 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativePollStatus<'loca
         return new_string(&mut env, "Emulator is not running.");
     };
     let mut session = session.lock().unwrap_or_else(|error| error.into_inner());
+    poll_worker(&mut session);
+    new_string(&mut env, &session.status)
+}
+
+fn poll_worker(session: &mut Session) {
     loop {
         match session.worker.events.try_recv() {
             Ok(WorkerEvent::Frame(frame)) => {
@@ -312,7 +401,8 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativePollStatus<'loca
             Ok(WorkerEvent::Status(status)) => if !session.finished {session.status=status;},
             Ok(WorkerEvent::InputApplied(_)) => {}
             Ok(WorkerEvent::Finished(status)) => {
-                session.status = status;
+                session.failed = status.is_err();
+                session.status = status.unwrap_or_else(|error| error);
                 session.finished = true;
                 break;
             }
@@ -320,13 +410,13 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativePollStatus<'loca
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
                 if !session.finished {
                     session.status = "Emulator worker stopped unexpectedly.".into();
+                    session.failed = true;
                     session.finished = true;
                 }
                 break;
             }
         }
     }
-    new_string(&mut env, &session.status)
 }
 
 #[no_mangle]
@@ -402,19 +492,25 @@ pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeIsRunning(
 }
 
 #[no_mangle]
-pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStop(
-    _env: JNIEnv<'_>,
-    _this: JObject<'_>,
-    handle: jlong,
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeSetPaused(
+    _env: JNIEnv<'_>, _this: JObject<'_>, handle: jlong, paused: jboolean,
 ) {
     if let Some(session) = session(handle) {
-        let mut session = session.lock().unwrap_or_else(|error| error.into_inner());
-        session.worker.stop();
-        session.finished = true;
-        if session.status.starts_with("Running") || session.status.starts_with("Starting") {
-            session.status = "Stopped.".into();
-        }
+        if let Ok(session) = session.lock() { session.worker.set_paused(paused != 0); }
     }
+}
+
+#[no_mangle]
+pub extern "system" fn Java_com_samsung_e830_NativeBridge_nativeStop<'local>(
+    mut env: JNIEnv<'local>,
+    _this: JObject<'local>,
+    handle: jlong,
+) -> jstring {
+    let Some(session) = session(handle) else { return new_string(&mut env, ""); };
+    let mut session = session.lock().unwrap_or_else(|error| error.into_inner());
+    session.worker.stop();
+    poll_worker(&mut session);
+    new_string(&mut env, if session.failed { &session.status } else { "" })
 }
 
 #[no_mangle]

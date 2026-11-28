@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.util.AtomicFile
+import androidx.core.content.ContextCompat
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -12,15 +13,18 @@ import java.io.IOException
 import java.util.Locale
 import java.util.UUID
 
-internal class FirmwareLibrary(context: Context) {
-    private val resolver: ContentResolver = context.applicationContext.contentResolver
-    private val root = File(context.applicationContext.filesDir, "firmware-library")
+internal class FirmwareLibrary private constructor(context: Context) {
+    private val app = context.applicationContext
+    private val localized: Context get() = ContextCompat.getContextForLanguage(app)
+    private fun text(id: Int, vararg args: Any) = if (args.isEmpty()) localized.getString(id) else localized.getString(id, *args)
+    private val resolver: ContentResolver = app.contentResolver
+    private val root = File(app.filesDir, "firmware-library")
     private val indexFile = File(root, "library.json")
     private val index = AtomicFile(indexFile)
     private var recovered = false
 
     init {
-        if (!root.exists() && !root.mkdirs()) throw IOException("Could not create the firmware library.")
+        if (!root.exists() && !root.mkdirs()) throw IOException(text(R.string.firmware_library_create_failed))
     }
 
     @Synchronized
@@ -48,29 +52,34 @@ internal class FirmwareLibrary(context: Context) {
             val name = displayName(uri)
             val extension = name.substringAfterLast('.', "").lowercase(Locale.ROOT)
             val role = profile.roles.firstOrNull { extension in it.extensions }
-                ?: throw IllegalArgumentException(profile.selectionHint)
+                ?: throw IllegalArgumentException(profile.selectionHint(localized))
             if (selected.putIfAbsent(role.role, uri to name) != null) {
-                throw IllegalArgumentException("Select only one ${role.role} file.")
+                throw IllegalArgumentException(text(R.string.firmware_role_duplicate, role.role))
             }
         }
         for (role in profile.roles.filter { it.required }) {
-            if (role.role !in selected) throw IllegalArgumentException("The ${role.role} file was not selected.")
+            if (role.role !in selected) throw IllegalArgumentException(text(R.string.firmware_role_missing, role.role))
         }
         val image = selected.getValue("image")
         val id = UUID.randomUUID().toString()
         val staging = File(root, ".import-$id")
         val destination = File(root, id)
-        if (!staging.mkdirs()) throw IOException("Could not stage the firmware import.")
+        if (!staging.mkdirs()) throw IOException(text(R.string.firmware_stage_failed))
         try {
             val files = selected.mapValues { (role, source) ->
                 val extension = source.second.substringAfterLast('.').lowercase(Locale.ROOT)
                 copyUri(source.first, File(staging, "$role.$extension"))
             }
-            val display = image.second.substringBeforeLast('.', image.second).ifBlank { profile.name }.take(80)
+            val display = image.second.substringBeforeLast('.', image.second).ifBlank { profile.name }.take(MAX_NAME_LENGTH)
             val staged = FirmwareEntry(id, display, staging, device, files)
-            val error = NativeBridge.nativeValidateSelection(staged.selectionJson())
+            val error = if (device == "k750i") {
+                // Publish the new machine and its initial flash together.
+                NativeBridge.nativeCreateInternalMemory(
+                    staged.selectionJson(), File(staging, FirmwareEntry.K750_MEMORY_DIRECTORY).absolutePath,
+                )
+            } else NativeBridge.nativeValidateSelection(staged.selectionJson())
             if (error.isNotBlank()) throw IllegalArgumentException(error)
-            if (!staging.renameTo(destination)) throw IOException("Could not finish the firmware import.")
+            if (!staging.renameTo(destination)) throw IOException(text(R.string.firmware_finish_failed))
             val names = files.mapValues { it.value.name }
             writeRecords(readRecords() + Record(id, display, device, names))
             return FirmwareEntry(id, display, destination, device, names.mapValues { File(destination, it.value) })
@@ -82,13 +91,24 @@ internal class FirmwareLibrary(context: Context) {
     }
 
     @Synchronized
+    fun rename(id: String, name: String) {
+        val display = name.trim()
+        require(display.isNotEmpty() && display.length <= MAX_NAME_LENGTH) { "Invalid phone name." }
+        ensureRecovered()
+        val records = readRecords()
+        val record = records.firstOrNull { it.id == id } ?: throw IOException(text(R.string.firmware_missing))
+        if (record.name == display) return
+        writeRecords(records.map { if (it.id == id) it.copy(name = display) else it })
+    }
+
+    @Synchronized
     fun attachOneNand(entry: FirmwareEntry, uri: Uri): FirmwareEntry {
         ensureRecovered()
         require(entry.profile.hasNand) { "This phone has no NAND profile." }
         val name = displayName(uri)
         val staging = File(entry.directory, ".physical-onenand.tmp")
         val destination = File(entry.directory, "physical.onenand.bin")
-        if (staging.exists() && !staging.delete()) throw IOException("Could not clear a previous NAND import attempt.")
+        if (staging.exists() && !staging.delete()) throw IOException(text(R.string.nand_clear_failed))
         try {
             copyUri(uri, staging)
             val selected = entry.copy(files = entry.files + ("nand" to staging))
@@ -109,7 +129,7 @@ internal class FirmwareLibrary(context: Context) {
             return updated
         } catch (error: Throwable) {
             staging.delete()
-            throw IllegalArgumentException("Could not use $name: ${error.message ?: "invalid file"}", error)
+            throw IllegalArgumentException(text(R.string.firmware_file_invalid, name, error.localizedMessage ?: text(R.string.invalid_file)), error)
         }
     }
 
@@ -127,7 +147,7 @@ internal class FirmwareLibrary(context: Context) {
         )
         AtomicFile(stored).delete()
         relatedFiles.filter { it != stored }.forEach { if (it.exists()) it.delete() }
-        if (relatedFiles.any(File::exists)) throw IOException("Could not remove the imported NAND copy.")
+        if (relatedFiles.any(File::exists)) throw IOException(text(R.string.nand_remove_failed))
         val updated = entry.copy(files = entry.files - "nand")
         writeRecords(readRecords().map { if (it.id == updated.id) updated.record() else it })
         return updated
@@ -138,8 +158,8 @@ internal class FirmwareLibrary(context: Context) {
         ensureRecovered()
         val remaining = readRecords().filterNot { it.id == entry.id }
         val tombstone = File(root, ".remove-${entry.id}")
-        if (tombstone.exists()) throw IOException("A previous firmware removal is still being recovered.")
-        if (!entry.directory.renameTo(tombstone)) throw IOException("Could not stage this firmware entry for removal.")
+        if (tombstone.exists()) throw IOException(text(R.string.firmware_removal_pending))
+        if (!entry.directory.renameTo(tombstone)) throw IOException(text(R.string.firmware_remove_failed))
         try {
             writeRecords(remaining)
         } catch (error: Throwable) {
@@ -168,7 +188,7 @@ internal class FirmwareLibrary(context: Context) {
                     val id = pending.name.removePrefix(".remove-")
                     if (ID_PATTERN.matches(id) && id in recordIds && !File(root, id).exists()) {
                         if (!pending.renameTo(File(root, id))) {
-                            throw IOException("Could not restore a firmware entry after an interrupted removal.")
+                            throw IOException(text(R.string.firmware_restore_failed))
                         }
                     } else {
                         pending.deleteRecursively()
@@ -198,11 +218,11 @@ internal class FirmwareLibrary(context: Context) {
         return resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
             if (!cursor.moveToFirst()) null else cursor.getString(0)
         }?.takeIf(String::isNotBlank) ?: uri.lastPathSegment?.substringAfterLast('/')?.takeIf(String::isNotBlank)
-        ?: throw IOException("The selected document has no file name.")
+        ?: throw IOException(text(R.string.file_name_missing))
     }
 
     private fun copyUri(uri: Uri, destination: File): File {
-        val input = resolver.openInputStream(uri) ?: throw IOException("Could not open the selected file.")
+        val input = resolver.openInputStream(uri) ?: throw IOException(text(R.string.file_open_failed))
         input.use { source ->
             destination.outputStream().use { output ->
                 val buffer = ByteArray(64 * 1024)
@@ -211,10 +231,10 @@ internal class FirmwareLibrary(context: Context) {
                     val count = source.read(buffer)
                     if (count < 0) break
                     total += count
-                    if (total > MAX_FILE_BYTES) throw IOException("A selected file exceeds the 128 MiB import limit.")
+                    if (total > MAX_FILE_BYTES) throw IOException(text(R.string.file_too_large))
                     output.write(buffer, 0, count)
                 }
-                if (total == 0L) throw IOException("A selected file is empty.")
+                if (total == 0L) throw IOException(text(R.string.file_empty))
             }
         }
         return destination
@@ -251,7 +271,7 @@ internal class FirmwareLibrary(context: Context) {
                                 put(role, file)
                             }
                         }
-                        add(Record(id, name.take(80), device, files))
+                        add(Record(id, name.take(MAX_NAME_LENGTH), device, files))
                     }
                 }
             }
@@ -277,8 +297,14 @@ internal class FirmwareLibrary(context: Context) {
     private data class Record(val id: String, val name: String, val device: String, val files: Map<String, String>)
     private fun FirmwareEntry.record() = Record(id, name, device, files.mapValues { it.value.name })
 
-    private companion object {
-        const val MAX_FILE_BYTES = 128L * 1024L * 1024L
-        val ID_PATTERN = Regex("^[0-9a-fA-F-]{36}$")
+    companion object {
+        private var instance: FirmwareLibrary? = null
+
+        @Synchronized
+        fun get(context: Context): FirmwareLibrary = instance ?: FirmwareLibrary(context.applicationContext).also { instance = it }
+
+        const val MAX_NAME_LENGTH = 80
+        private const val MAX_FILE_BYTES = 128L * 1024L * 1024L
+        private val ID_PATTERN = Regex("^[0-9a-fA-F-]{36}$")
     }
 }

@@ -2,7 +2,7 @@
 //! Bounded OBEX file-transfer client. The handset's firmware serves every object.
 use super::{FileEntry, MAX_FILE_BYTES};
 use anyhow::{bail, ensure, Context, Result};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 
 const TARGET: &[u8] = &[
@@ -92,12 +92,19 @@ fn remote_error(status: u8) -> anyhow::Error {
     )
 }
 
+#[derive(PartialEq)]
+enum AtReply {
+    Ok,
+    Connect,
+    Refused,
+}
+
 pub struct ObexClient<T: Read + Write> {
     stream: T,
     peer_max: usize,
     connection: Vec<u8>,
     connected: bool,
-    failed: bool,
+    failure: Option<String>,
     timeout: Duration,
 }
 impl<T: Read + Write> ObexClient<T> {
@@ -107,7 +114,7 @@ impl<T: Read + Write> ObexClient<T> {
             peer_max: 255,
             connection: Vec::new(),
             connected: false,
-            failed: false,
+            failure: None,
             timeout: Duration::from_secs(15),
         }
     }
@@ -116,15 +123,27 @@ impl<T: Read + Write> ObexClient<T> {
         self
     }
     pub fn is_connected(&self) -> bool {
-        self.connected && !self.failed
+        self.connected && !self.failed()
     }
     pub fn failed(&self) -> bool {
-        self.failed
+        self.failure.is_some()
+    }
+    fn check_stream(&self) -> Result<()> {
+        if let Some(reason) = &self.failure {
+            bail!("Restart K750i to reopen the file-transfer stream: {reason}");
+        }
+        Ok(())
+    }
+    fn mark_failed(&mut self, error: &anyhow::Error) {
+        self.connected = false;
+        self.failure.get_or_insert_with(|| format!("{error:#}"));
     }
     fn exact(&mut self, bytes: &mut [u8], deadline: Instant) -> Result<()> {
         let mut count = 0;
         while count < bytes.len() {
-            ensure!(Instant::now() < deadline, "Phone receive deadline exceeded");
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(io::ErrorKind::TimedOut, "Phone receive deadline exceeded").into());
+            }
             match self.stream.read(&mut bytes[count..]) {
                 Ok(0) => bail!("Phone file-transfer stream disconnected"),
                 Ok(size) => count += size,
@@ -161,7 +180,7 @@ impl<T: Read + Write> ObexClient<T> {
         Ok(())
     }
     fn exchange(&mut self, opcode: u8, data: &[u8]) -> Result<(u8, Vec<u8>)> {
-        ensure!(!self.failed, "Reconnect the phone file-transfer session");
+        self.check_stream()?;
         ensure!(
             data.len() + 3 <= if opcode == 0x80 { 65535 } else { self.peer_max },
             "OBEX request exceeds phone packet size"
@@ -183,66 +202,109 @@ impl<T: Read + Write> ObexClient<T> {
             self.exact(&mut body, deadline)?;
             Ok((prefix[0], body))
         })();
-        if result.is_err() {
-            self.failed = true;
-            self.connected = false;
+        if let Err(error) = &result {
+            self.mark_failed(error);
         }
         result
     }
-    fn handover(&mut self, command: &[u8]) -> Result<bool> {
-        let deadline = Instant::now() + self.timeout;
-        self.write(command, deadline)?;
+    fn read_at_reply(&mut self, deadline: Instant, handover: bool) -> Result<AtReply> {
         let mut line = Vec::new();
-        for _ in 0..4096 {
+        let mut saw_ok = false;
+        for received in 0..4096 {
             let mut byte = [0];
-            self.exact(&mut byte, deadline)?;
+            self.exact(&mut byte, deadline).with_context(|| {
+                format!("AT reply incomplete ({received} bytes, OK received: {saw_ok})")
+            })?;
             line.push(byte[0]);
             if line.ends_with(b"\r\n") {
-                let text = std::str::from_utf8(&line)?.trim();
-                if text == "CONNECT" {
-                    return Ok(true);
-                }
-                if matches!(text, "ERROR" | "NO CARRIER" | "BUSY")
-                    || text.starts_with("+CME ERROR:")
-                {
-                    return Ok(false);
+                let text = line.trim_ascii();
+                match text {
+                    b"OK" if !handover => return Ok(AtReply::Ok),
+                    b"OK" => saw_ok = true,
+                    b"CONNECT" => return Ok(AtReply::Connect),
+                    b"ERROR" | b"NO CARRIER" | b"BUSY" => return Ok(AtReply::Refused),
+                    _ if text.starts_with(b"+CME ERROR:") => return Ok(AtReply::Refused),
+                    _ => {}
                 }
                 line.clear();
             }
         }
-        bail!("Invalid AT file-transfer handover response")
+        bail!("Invalid AT response")
+    }
+    fn handover(&mut self, command: &str) -> Result<bool> {
+        let deadline = Instant::now() + self.timeout;
+        self.write(command.as_bytes(), deadline)
+            .and_then(|()| self.read_at_reply(deadline, true))
+            .with_context(|| format!("{} handover", command.trim_end()))
+            .map(|reply| reply == AtReply::Connect)
+    }
+    /// A ready UART does not imply that the handset's AT interpreter is running.
+    pub fn connect_when_ready(&mut self) -> Result<()> {
+        self.check_stream()?;
+        if !self.is_connected() {
+            // A plain AT command cannot switch protocols. It is safe to retry if
+            // the handset has not replied yet, including during first boot.
+            let deadline = Instant::now() + self.timeout.min(Duration::from_secs(3));
+            let result = self.write(b"AT\r", deadline)
+                .and_then(|()| self.read_at_reply(deadline, false));
+            match result {
+                Ok(AtReply::Ok) => {}
+                Ok(AtReply::Refused) => bail!("Phone file service is not ready; finish setup on K750i and retry"),
+                Err(error) if error.downcast_ref::<io::Error>()
+                    .is_some_and(|error| error.kind() == io::ErrorKind::TimedOut) => {
+                    bail!("No reply from K750i yet; finish setup, wait for the main screen and retry");
+                }
+                Ok(AtReply::Connect) => {
+                    let error = anyhow::anyhow!("Unexpected transition to binary file-transfer mode");
+                    self.mark_failed(&error);
+                    return self.check_stream();
+                }
+                Err(error) => {
+                    self.mark_failed(&error.context("AT readiness check"));
+                    return self.check_stream();
+                }
+            }
+        }
+        self.connect(false)
     }
     pub fn connect(&mut self, binary: bool) -> Result<()> {
-        let result = self.connect_inner(binary);
-        if result.is_err() {
-            self.failed = true;
-            self.connected = false;
-        }
-        result
-    }
-    fn connect_inner(&mut self, binary: bool) -> Result<()> {
+        self.check_stream()?;
         if self.is_connected() {
             return Ok(());
         }
-        ensure!(!self.failed, "Reconnect the phone file-transfer stream");
         if !binary {
-            let result = (|| {
-                if !self.handover(b"AT+CPROT=0\r")? && !self.handover(b"AT*EOBEX\r")? {
-                    bail!("Phone did not enter file-transfer mode; finish any handset dialog");
+            let handover = self.handover("AT+CPROT=0\r").and_then(|accepted| {
+                if accepted {
+                    Ok(true)
+                } else {
+                    self.handover("AT*EOBEX\r")
                 }
-                Ok(())
-            })();
-            if result.is_err() {
-                self.failed = true;
+            });
+            match handover {
+                // Give the phone time to switch its UART parser, as the Python host does.
+                Ok(true) => std::thread::sleep(Duration::from_millis(25)),
+                // Both commands ended in an explicit AT error, so it is safe to try again.
+                Ok(false) => bail!("Phone did not enter file-transfer mode; finish any handset dialog and retry"),
+                Err(error) => {
+                    let error = error.context("AT file-transfer handover");
+                    self.mark_failed(&error);
+                    return self.check_stream();
+                }
             }
-            result?;
         }
+        if let Err(error) = self.connect_binary() {
+            self.mark_failed(&error);
+            return self.check_stream();
+        }
+        Ok(())
+    }
+    fn connect_binary(&mut self) -> Result<()> {
         let mut data = vec![0x10, 0];
         data.extend_from_slice(&(RECEIVE_MAX as u16).to_be_bytes());
         data.extend(header(0x46, TARGET)?);
         let (status, response) = self.exchange(0x80, &data)?;
         if status != 0xa0 {
-            return Err(remote_error(status));
+            return Err(remote_error(status).context("OBEX CONNECT"));
         }
         ensure!(
             response.len() >= 4 && response[0] >> 4 == 1 && response[1] == 0,
@@ -278,7 +340,7 @@ impl<T: Read + Write> ObexClient<T> {
             request.extend(name_header(part)?);
             let (status, _) = self.exchange(0x85, &request)?;
             if status != 0xa0 {
-                return Err(remote_error(status));
+                return Err(remote_error(status).context(format!("OBEX SETPATH {part:?}")));
             }
         }
         Ok(())
@@ -297,7 +359,7 @@ impl<T: Read + Write> ObexClient<T> {
             request.append(&mut metadata);
             let (status, response) = self.exchange(0x83, &request)?;
             if status != 0x90 && status != 0xa0 {
-                return Err(remote_error(status));
+                return Err(remote_error(status).context("OBEX GET"));
             }
             let mut end = false;
             for (tag, value) in parse_headers(&response)? {
@@ -324,8 +386,9 @@ impl<T: Read + Write> ObexClient<T> {
                 return Ok(count);
             }
         }
-        self.failed = true;
-        bail!("Too many OBEX continuation packets")
+        let error = anyhow::anyhow!("Too many OBEX continuation packets");
+        self.mark_failed(&error);
+        Err(error)
     }
     pub fn list(&mut self, path: &[String]) -> Result<Vec<FileEntry>> {
         self.set_path(path)?;
@@ -426,8 +489,9 @@ impl<T: Read + Write> ObexClient<T> {
         let (status, _) = self.exchange(0x81, &request)?;
         self.connected = false;
         if status != 0xa0 {
-            self.failed = true;
-            return Err(remote_error(status));
+            let error = remote_error(status).context("OBEX DISCONNECT");
+            self.mark_failed(&error);
+            return Err(error);
         }
         Ok(())
     }
@@ -572,12 +636,66 @@ mod tests {
         p.extend_from_slice(body);
         p
     }
-    #[test]
-    fn real_protocol_get_and_put_packets_complete() {
+    fn accept_connect() -> Vec<u8> {
         let mut connect = vec![0x10, 0, 1, 0];
         connect.extend(header(0x4a, TARGET).unwrap());
         connect.extend(header(0xcb, &[1, 2, 3, 4]).unwrap());
-        let mut read = packet(0xa0, &connect);
+        packet(0xa0, &connect)
+    }
+
+    #[test]
+    fn both_at_refusals_allow_another_handover() {
+        let mut read = b"\r\nERROR\r\n\r\nBUSY\r\n\r\nCONNECT\r\n".to_vec();
+        read.extend(accept_connect());
+        let mut client = ObexClient::new(Script {
+            reads: Cursor::new(read),
+            writes: Vec::new(),
+        });
+        let error = client.connect(false).unwrap_err();
+        assert!(error.to_string().contains("finish any handset dialog"));
+        assert!(!client.failed());
+        client.disconnect().unwrap();
+        assert_eq!(client.stream.writes, b"AT+CPROT=0\rAT*EOBEX\r");
+        client.connect(false).unwrap();
+        assert!(client.is_connected());
+    }
+
+    #[test]
+    fn readiness_check_never_starts_handover_until_at_responds() {
+        let mut read = b"\r\nBUSY\r\n\r\nOK\r\n\r\nCONNECT\r\n".to_vec();
+        read.extend(accept_connect());
+        let mut client = ObexClient::new(Script {
+            reads: Cursor::new(read),
+            writes: Vec::new(),
+        });
+        assert!(client.connect_when_ready().unwrap_err().to_string().contains("not ready"));
+        assert!(!client.failed());
+        assert_eq!(client.stream.writes, b"AT\r");
+        client.connect_when_ready().unwrap();
+        assert!(client.stream.writes.starts_with(b"AT\rAT\rAT+CPROT=0\r\x80"));
+        assert!(client.is_connected());
+    }
+
+    #[test]
+    fn invalid_binary_connect_preserves_error_and_blocks_another_handover() {
+        let mut read = b"\r\nCONNECT\r\n".to_vec();
+        read.extend(packet(0xa0, &[]));
+        let mut client = ObexClient::new(Script {
+            reads: Cursor::new(read),
+            writes: Vec::new(),
+        });
+        let error = client.connect(false).unwrap_err().to_string();
+        assert!(error.contains("Restart K750i"));
+        assert!(error.contains("Invalid OBEX CONNECT response"));
+        assert!(client.failed());
+        let bytes_written = client.stream.writes.len();
+        assert_eq!(client.connect(false).unwrap_err().to_string(), error);
+        assert_eq!(client.stream.writes.len(), bytes_written);
+    }
+
+    #[test]
+    fn real_protocol_get_and_put_packets_complete() {
+        let mut read = accept_connect();
         read.extend(packet(0xa0, &[]));
         let mut body = header(0xc3, &3u32.to_be_bytes()).unwrap();
         body.extend(header(0x49, b"abc").unwrap());

@@ -222,6 +222,16 @@ impl DiagnosticsHandle {
             s.logs.push_back(entry);
         });
     }
+    pub(crate) fn record_save_phase(&self, phase: &str, elapsed: Duration, ok: bool) {
+        self.log("info", "save-timing", format!("{phase} elapsed_ms={:.3} ok={ok}",
+            elapsed.as_secs_f64() * 1000.0));
+    }
+    pub(crate) fn measure_save<T, E>(&self, phase: &str, operation: impl FnOnce() -> Result<T, E>) -> Result<T, E> {
+        let start = Instant::now();
+        let result = operation();
+        self.record_save_phase(phase, start.elapsed(), result.is_ok());
+        result
+    }
     pub fn set_developer_mode(&self, enabled: bool) {
         self.with(|s| s.value.developer_mode = enabled);
     }

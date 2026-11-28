@@ -112,32 +112,35 @@ pub fn prepare(main:&Path, fs_image:&Path, data_dir:&Path) -> Result<PathBuf> {
     Ok(prepare_locked(main,fs_image,data_dir)?.state)
 }
 
-pub fn prepare_locked(main:&Path, fs_image:&Path, data_dir:&Path) -> Result<Prepared> {
+/// Locate the same private storage as a normal boot without provisioning firmware.
+pub fn workspace(main:&Path, fs_image:&Path, data_dir:&Path) -> Result<PathBuf> {
     let mut archive=ZipArchive::new(Cursor::new(BUNDLE))?;
     let manifest:Manifest=serde_json::from_slice(&member(&mut archive,"manifest.json")?)?;
+    let (main_entry,fs_entry)=catalog_pair(&manifest)?;
+    workspace_for(main,fs_image,data_dir,main_entry,fs_entry)
+}
+
+fn catalog_pair(manifest:&Manifest) -> Result<(&Entry,&Entry)> {
+    let main=manifest.catalog.entries.iter().find(|e|e.id=="main").context("MAIN catalog")?;
+    let fs=manifest.catalog.entries.iter().find(|e|e.id=="fs").context("FS catalog")?;
+    Ok((main,fs))
+}
+
+fn workspace_for(main:&Path, fs_image:&Path, data_dir:&Path, main_entry:&Entry, fs_entry:&Entry) -> Result<PathBuf> {
+    let identity=sha(format!("{}\n{}\n{}\n{}\n{}",sha(BUNDLE),main_entry.sha256,fs_entry.sha256,
+        fs::canonicalize(main)?.display(),fs::canonicalize(fs_image)?.display()).as_bytes());
+    Ok(data_dir.join("k750i").join(&identity[..24]))
+}
+
+fn provision(main:&Path, fs_image:&Path, manifest:&Manifest) -> Result<(Vec<(u64,Vec<u8>)>, Vec<u8>)> {
     let main_bytes=fs::read(main).with_context(||format!("Reading {}",main.display()))?;
     let fs_bytes=fs::read(fs_image).with_context(||format!("Reading {}",fs_image.display()))?;
-    let main_entry=manifest.catalog.entries.iter().find(|e|e.id=="main").context("MAIN catalog")?;
-    let fs_entry=manifest.catalog.entries.iter().find(|e|e.id=="fs").context("FS catalog")?;
+    let (main_entry,fs_entry)=catalog_pair(manifest)?;
     let mut main_records=records(&main_bytes,main_entry)?;
     // Apply only declared, byte-checked compatibility to the private mapped
     // copy after authenticating every original container and payload byte.
     patch_records(&mut main_records, &manifest.main_patches)?;
     let fs_records=records(&fs_bytes,fs_entry)?;
-    let identity=sha(format!("{}\n{}\n{}\n{}\n{}",sha(BUNDLE),main_entry.sha256,fs_entry.sha256,
-        fs::canonicalize(main)?.display(),fs::canonicalize(fs_image)?.display()).as_bytes());
-    let workspace=data_dir.join("k750i").join(&identity[..24]);
-    fs::create_dir_all(&workspace)?;
-    let lease=fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
-        .open(workspace.join("session.lock"))?;
-    lease.lock().context("Waiting for the previous native phone session")?;
-    let mut state:Value=serde_json::from_slice(&member(&mut archive,"state-template.json")?)?;
-    let mut seeds=Vec::new();
-    for (index,(address,bytes)) in main_records.into_iter().enumerate() {
-        let file=workspace.join(format!("main-{index}.bin"));
-        fs::write(&file,bytes)?;
-        seeds.push(json!({"address":address,"file":file}));
-    }
     let mut nor_fs=vec![255;manifest.fs.size];
     for (address,bytes) in fs_records {
         let offset=address.checked_sub(manifest.fs.base).context("FS address")? as usize;
@@ -155,12 +158,100 @@ pub fn prepare_locked(main:&Path, fs_image:&Path, data_dir:&Path) -> Result<Prep
         target.copy_from_slice(&value);
     }
     ensure!(sha(&nor_fs)==manifest.fs.provisioned_sha256,"provisioned FS identity differs");
+    Ok((main_records, nor_fs))
+}
+
+fn compatibility(archive:&mut ZipArchive<Cursor<&[u8]>>, name:&str, identity:&Identity) -> Result<Vec<u8>> {
+    let bytes=member(archive,name)?;
+    ensure!(bytes.len()==identity.size && sha(&bytes)==identity.sha256,"native compatibility input {name} differs");
+    Ok(bytes)
+}
+
+/// Create a portable memory file for a new phone, using the same authenticated
+/// flash bytes as its first boot. The caller supplies a fresh private directory.
+pub fn create_internal_memory(main:&Path, fs_image:&Path, workspace:&Path) -> Result<()> {
+    let mut archive=ZipArchive::new(Cursor::new(BUNDLE))?;
+    let manifest:Manifest=serde_json::from_slice(&member(&mut archive,"manifest.json")?)?;
+    let (main_records, mut nor_fs)=provision(main,fs_image,&manifest)?;
+    fs::create_dir(workspace)?;
+    crate::flash::PendingMemory::seed(workspace, |name, address, size| match name {
+        "main.bin" => {
+            let mut bytes=vec![255;size as usize];
+            for (base, record) in &main_records {
+                let offset=base.checked_sub(address).context("MAIN region address")? as usize;
+                bytes.get_mut(offset..offset+record.len()).context("MAIN region bounds")?.copy_from_slice(record);
+            }
+            Ok(bytes)
+        }
+        "fs.bin" => Ok(std::mem::take(&mut nor_fs)),
+        _ => compatibility(&mut archive,name,manifest.compatibility_files.get(name).context("Initial flash image")?),
+    })?.publish(workspace)
+}
+
+pub fn prepare_locked(main:&Path, fs_image:&Path, data_dir:&Path) -> Result<Prepared> {
+    prepare_in(main,fs_image,|manifest| {
+        let (main_entry,fs_entry)=catalog_pair(manifest)?;
+        workspace_for(main,fs_image,data_dir,main_entry,fs_entry)
+    })
+}
+
+pub fn prepare_locked_at(main:&Path, fs_image:&Path, workspace:&Path) -> Result<Prepared> {
+    prepare_in(main,fs_image,|_| Ok(workspace.to_owned()))
+}
+
+/// Reserve a phone before handing startup to the background worker.
+/// The lease also excludes offline access to its saved internal memory.
+pub struct LockedWorkspace {
+    directory: PathBuf,
+    lease: fs::File,
+}
+
+impl LockedWorkspace {
+    fn open(directory: PathBuf, wait: bool) -> Result<Self> {
+        fs::create_dir_all(&directory)?;
+        let lease = fs::OpenOptions::new().create(true).truncate(false).read(true).write(true)
+            .open(directory.join("session.lock"))?;
+        if wait {
+            lease.lock().context("Waiting for the previous native phone session")?;
+        } else {
+            lease.try_lock().context("The phone or its internal memory is already in use")?;
+        }
+        Ok(Self { directory, lease })
+    }
+
+    pub fn try_open(directory: PathBuf) -> Result<Self> {
+        Self::open(directory, false)
+    }
+
+    pub fn prepare(self, main: &Path, fs_image: &Path) -> Result<Prepared> {
+        let mut archive = ZipArchive::new(Cursor::new(BUNDLE))?;
+        let manifest = serde_json::from_slice(&member(&mut archive, "manifest.json")?)?;
+        prepare_reserved(main, fs_image, archive, manifest, self)
+    }
+}
+
+fn prepare_in(main:&Path, fs_image:&Path, locate:impl FnOnce(&Manifest) -> Result<PathBuf>) -> Result<Prepared> {
+    let mut archive=ZipArchive::new(Cursor::new(BUNDLE))?;
+    let manifest:Manifest=serde_json::from_slice(&member(&mut archive,"manifest.json")?)?;
+    let locked = LockedWorkspace::open(locate(&manifest)?, true)?;
+    prepare_reserved(main, fs_image, archive, manifest, locked)
+}
+
+fn prepare_reserved(main:&Path, fs_image:&Path, mut archive:ZipArchive<Cursor<&[u8]>>,
+    manifest:Manifest, locked:LockedWorkspace) -> Result<Prepared> {
+    let LockedWorkspace { directory: workspace, lease } = locked;
+    let (main_records,nor_fs)=provision(main,fs_image,&manifest)?;
+    let mut state:Value=serde_json::from_slice(&member(&mut archive,"state-template.json")?)?;
+    let mut seeds=Vec::new();
+    for (index,(address,bytes)) in main_records.into_iter().enumerate() {
+        let file=workspace.join(format!("main-{index}.bin"));
+        fs::write(&file,bytes)?;
+        seeds.push(json!({"address":address,"file":file}));
+    }
     let fs_file=workspace.join("fs.bin"); fs::write(&fs_file,nor_fs)?;
     seeds.push(json!({"address":manifest.fs.base,"file":fs_file}));
     for (name,identity) in &manifest.compatibility_files {
-        let bytes=member(&mut archive,name)?;
-        ensure!(bytes.len()==identity.size && sha(&bytes)==identity.sha256,"native compatibility input {name} differs");
-        fs::write(workspace.join(name),bytes)?;
+        fs::write(workspace.join(name),compatibility(&mut archive,name,identity)?)?;
     }
     seeds.push(json!({"address":0x45f00000u64,"file":workspace.join("gdfs.bin")}));
     state["regions"][0]["seeds"]=json!(seeds);

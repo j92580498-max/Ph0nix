@@ -10,8 +10,11 @@ import androidx.recyclerview.widget.RecyclerView
 
 internal class FirmwareAdapter(
     private val onRun: (FirmwareEntry) -> Unit,
+    private val onRename: (FirmwareEntry) -> Unit,
     private val onSelectOneNand: (FirmwareEntry) -> Unit,
     private val onUseErasedFlash: (FirmwareEntry) -> Unit,
+    private val onExportMemory: (FirmwareEntry) -> Unit,
+    private val onImportMemory: (FirmwareEntry) -> Unit,
     private val onRemove: (FirmwareEntry) -> Unit,
 ) : RecyclerView.Adapter<FirmwareAdapter.ViewHolder>() {
     private var items: List<FirmwareEntry> = emptyList()
@@ -40,7 +43,7 @@ internal class FirmwareAdapter(
         fun bind(entry: FirmwareEntry) {
             title.text = entry.name
             val profile = entry.profile
-            subtitle.text = "${profile.name}\n${profile.displayWidth} × ${profile.displayHeight} LCD"
+            subtitle.text = itemView.context.getString(R.string.firmware_card_subtitle, profile.name, profile.displayWidth, profile.displayHeight)
             itemView.setOnClickListener { onRun(entry) }
             requireNotNull(itemView.findViewById<View>(R.id.btn_run)).setOnClickListener { onRun(entry) }
             more.setOnClickListener { showMenu(it, entry) }
@@ -50,16 +53,24 @@ internal class FirmwareAdapter(
         private fun showMenu(anchor: View, entry: FirmwareEntry) {
             val popup = PopupMenu(anchor.context, anchor)
             popup.menu.add(0, ACTION_RUN, 0, R.string.run_firmware)
+            popup.menu.add(0, ACTION_RENAME, 0, R.string.rename_phone)
             if (entry.profile.hasNand) popup.menu.add(0, ACTION_SELECT_NAND, 0, R.string.nand_select)
             if (entry.onenand != null) {
                 popup.menu.add(0, ACTION_USE_ERASED, 1, R.string.nand_auto)
             }
-            popup.menu.add(0, ACTION_REMOVE, 2, R.string.remove_firmware)
+            if (entry.device == "k750i") {
+                popup.menu.add(0, ACTION_EXPORT_MEMORY, 2, R.string.k750_memory_export)
+                popup.menu.add(0, ACTION_IMPORT_MEMORY, 2, R.string.k750_memory_import)
+            }
+            popup.menu.add(0, ACTION_REMOVE, 3, R.string.remove_firmware)
             popup.setOnMenuItemClickListener { item ->
                 when (item.itemId) {
                     ACTION_RUN -> onRun(entry)
+                    ACTION_RENAME -> onRename(entry)
                     ACTION_SELECT_NAND -> onSelectOneNand(entry)
                     ACTION_USE_ERASED -> onUseErasedFlash(entry)
+                    ACTION_EXPORT_MEMORY -> onExportMemory(entry)
+                    ACTION_IMPORT_MEMORY -> onImportMemory(entry)
                     ACTION_REMOVE -> onRemove(entry)
                 }
                 true
@@ -73,5 +84,8 @@ internal class FirmwareAdapter(
         const val ACTION_USE_ERASED = 2
         const val ACTION_REMOVE = 3
         const val ACTION_RUN = 4
+        const val ACTION_EXPORT_MEMORY = 5
+        const val ACTION_IMPORT_MEMORY = 6
+        const val ACTION_RENAME = 7
     }
 }

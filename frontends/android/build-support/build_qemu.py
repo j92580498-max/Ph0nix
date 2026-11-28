@@ -15,6 +15,7 @@ import subprocess
 import sys
 import tarfile
 import time
+import urllib.error
 import urllib.request
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -25,6 +26,9 @@ SOURCES = {
     'libffi-3.4.6': 'https://github.com/libffi/libffi/releases/download/v3.4.6/libffi-3.4.6.tar.gz',
     'pcre2-10.46': 'https://github.com/PCRE2Project/pcre2/releases/download/pcre2-10.46/pcre2-10.46.tar.bz2',
     'glib-2.84.4': 'https://download.gnome.org/sources/glib/2.84/glib-2.84.4.tar.xz',
+}
+MIRRORS = {
+    'glib-2.84.4': ('https://deb.debian.org/debian/pool/main/g/glib2.0/glib2.0_2.84.4.orig.tar.xz',),
 }
 HASHES = {
     'libiconv-1.17': '8f74213b56238c85a50a5329f77e06198771e70dd9a739779f4c02f65d971313',
@@ -99,8 +103,22 @@ def source(name, url, build):
     downloads=build/'downloads'; downloads.mkdir(exist_ok=True)
     file=downloads/url.rsplit('/',1)[1]
     if not file.is_file():
-        print('Downloading',url,flush=True)
-        urllib.request.urlretrieve(url,file)
+        partial = file.with_name(file.name + '.part')
+        for candidate in (url, *MIRRORS.get(name, ())):
+            print('Downloading', candidate, flush=True)
+            try:
+                with urllib.request.urlopen(candidate, timeout=12) as response, partial.open('wb') as output:
+                    shutil.copyfileobj(response, output)
+                if hashlib.sha256(partial.read_bytes()).hexdigest() != HASHES[name]:
+                    raise ValueError('archive checksum differs')
+                partial.replace(file)
+                break
+            except (urllib.error.URLError, TimeoutError, ValueError) as error:
+                print(f'Download failed: {error}', flush=True)
+            finally:
+                partial.unlink(missing_ok=True)
+        else:
+            raise RuntimeError('Could not download a verified Android dependency: ' + name)
     if hashlib.sha256(file.read_bytes()).hexdigest()!=HASHES[name]:
         raise ValueError('Android dependency archive identity differs: '+name)
     directory=build/'sources'/name
@@ -114,7 +132,7 @@ def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--ndk',type=Path,required=True)
     parser.add_argument('--build',type=Path,default=ROOT/'build/android/qemu')
-    parser.add_argument('--clang',default=shutil.which('clang-19') or shutil.which('clang'))
+    parser.add_argument('--clang',default=os.environ.get('FEATUREPHONE_ANDROID_CLANG') or shutil.which('clang-19') or shutil.which('clang'))
     parser.add_argument('--jobs',type=int,default=2)
     parser.add_argument('--tools-only',action='store_true')
     args=parser.parse_args()
@@ -146,9 +164,9 @@ def main():
             run(['cmake','--install',target],directory,env)
         else:
             target=args.build/'glib-build'
-            meson=ROOT/'qemu/build/pyvenv/bin/meson'
-            if not meson.is_file():
-                meson=shutil.which('meson') or ROOT/'.venv/bin/meson'
+            # Use the active build environment; the QEMU build directory can
+            # contain an incomplete virtual environment from an earlier job.
+            meson=shutil.which('meson') or ROOT/'.venv/bin/meson'
             if not Path(meson).is_file():
                 raise RuntimeError('Meson is required to build GLib. Install meson==1.11.1 in the build Python environment.')
             text=(directory/'meson.options' if (directory/'meson.options').is_file() else directory/'meson_options.txt').read_text()

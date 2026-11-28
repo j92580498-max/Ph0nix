@@ -13,6 +13,7 @@
     "Samsung EC/35-compatible NAND begins with assumed erased FF page/spare storage and good blocks; no-wear protocols are synthetic.",
     "External RAM zero fill and K750 DTCM cold reset record 0x4200FFDC+28 zero bytes are declared inputs; other internal RAM remains unknown.",
     "K750 power-start capture and polled/startup PMIC ADC samples are synthetic inputs; observed 0x88/0x89=0x15 calibration writes are accepted.",
+    "K750 R1DB001 native startup writes 0x3B to PMIC register 0x50 (STRH at 0x4493214E, observed on Linux x86_64); accept that exact register/value pair.",
     "Hash hardware runs immediate SHA-1 FIFO arithmetic, including mode4 KGEN; KGEN cryptographic equivalence and hardware latency are unestablished.",
     "Only identified K750 ROM SHA/KGEN initialization call sites receive synthetic context initialization; native MAIN performs FIFO update/final.",
     "DSP initial zero halfword pairs cover odd-length native upload tails only; guest uploads are preserved and DSP execution is not modeled.",
@@ -4679,6 +4680,10 @@
       {
         "register": 80,
         "value": 56
+      },
+      {
+        "register": 80,
+        "value": 59
       },
       {
         "register": 80,

@@ -17,7 +17,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /** The host adapter transfers OPP objects, then the app imports them through the phone's file service. */
 internal class BluetoothBridge(
-    context: Context,
+    private val context: Context,
     private val staging: File,
     private val log: (String, String) -> Unit,
     private val progress: (String) -> Unit,
@@ -36,8 +36,8 @@ internal class BluetoothBridge(
 
     @SuppressLint("MissingPermission") // Activity requests CONNECT before every adapter operation.
     fun peers(): List<BluetoothDevice> {
-        check(adapter != null) { "This device has no Bluetooth adapter." }
-        check(adapter.isEnabled) { "Enable Bluetooth in Android settings first." }
+        check(adapter != null) { context.getString(R.string.bluetooth_no_adapter) }
+        check(adapter.isEnabled) { context.getString(R.string.bluetooth_enable) }
         return adapter.bondedDevices.sortedBy { it.name ?: it.address }
     }
 
@@ -46,16 +46,16 @@ internal class BluetoothBridge(
         begin {
             var sender = 0L
             try {
-                check(adapter != null && adapter.isEnabled) { "Enable Bluetooth in Android settings first." }
+                check(adapter != null && adapter.isEnabled) { context.getString(R.string.bluetooth_enable) }
                 val connection = device.createRfcommSocketToServiceRecord(OPP_UUID)
                 socket = connection
-                check(!cancelled.get()) { "Transfer cancelled." }
+                check(!cancelled.get()) { context.getString(R.string.bluetooth_cancelled) }
                 deadline()
-                progress("Connecting to ${device.name ?: device.address}…")
+                progress(context.getString(R.string.bluetooth_connecting, device.name ?: device.address))
                 connection.connect()
-                check(!cancelled.get()) { "Transfer cancelled." }
+                check(!cancelled.get()) { context.getString(R.string.bluetooth_cancelled) }
                 sender = NativeBridge.nativeBluetoothSenderOpen(file.absolutePath)
-                check(sender != 0L) { "Could not open the Bluetooth sender." }
+                check(sender != 0L) { context.getString(R.string.bluetooth_sender_failed) }
                 var nextProgressNs = 0L
                 while (!cancelled.get()) {
                     val packet = NativeBridge.nativeBluetoothSenderNext(sender) ?: break
@@ -67,14 +67,14 @@ internal class BluetoothBridge(
                     val now = System.nanoTime()
                     if (now >= nextProgressNs) {
                         val state = JSONObject(NativeBridge.nativeBluetoothSenderProgress(sender))
-                        progress("Sending ${file.name}: ${state.optLong("bytes")} / ${state.optLong("total")} bytes")
+                        progress(context.getString(R.string.bluetooth_sending, file.name, state.optLong("bytes"), state.optLong("total")))
                         nextProgressNs = now + 100_000_000L
                     }
                 }
-                check(!cancelled.get()) { "Transfer cancelled." }
+                check(!cancelled.get()) { context.getString(R.string.bluetooth_cancelled) }
                 val state = JSONObject(NativeBridge.nativeBluetoothSenderProgress(sender))
-                check(state.optBoolean("finished")) { "Bluetooth transfer did not finish." }
-                progress("Sent ${file.name} (${state.optLong("bytes")} bytes).")
+                check(state.optBoolean("finished")) { context.getString(R.string.bluetooth_unfinished) }
+                progress(context.getString(R.string.bluetooth_sent, file.name, state.optLong("bytes")))
                 log("info", "Bluetooth sent ${file.name}: ${state.optLong("bytes")} bytes")
                 file.delete()
             } finally { if (sender != 0L) NativeBridge.nativeBluetoothSenderClose(sender) }
@@ -87,24 +87,24 @@ internal class BluetoothBridge(
             var receiver = 0L
             var completed = false
             try {
-                check(adapter != null && adapter.isEnabled) { "Enable Bluetooth in Android settings first." }
+                check(adapter != null && adapter.isEnabled) { context.getString(R.string.bluetooth_enable) }
                 val listener = adapter.listenUsingRfcommWithServiceRecord("ph0nix File Transfer", OPP_UUID)
                 server = listener
-                check(!cancelled.get()) { "Transfer cancelled." }
-                progress("Ready to receive for 120 seconds. Send a file to this Android device.")
+                check(!cancelled.get()) { context.getString(R.string.bluetooth_cancelled) }
+                progress(context.getString(R.string.bluetooth_ready))
                 val connection = listener.accept(120_000)
                 socket = connection
-                check(!cancelled.get()) { "Transfer cancelled." }
+                check(!cancelled.get()) { context.getString(R.string.bluetooth_cancelled) }
                 listener.close(); server = null
                 receiver = NativeBridge.nativeBluetoothReceiverOpen(staging.absolutePath)
-                check(receiver != 0L) { "Could not open the Bluetooth receiver." }
-                progress("Receiving from ${connection.remoteDevice.name ?: connection.remoteDevice.address}…")
+                check(receiver != 0L) { context.getString(R.string.bluetooth_receiver_failed) }
+                progress(context.getString(R.string.bluetooth_receiving, connection.remoteDevice.name ?: connection.remoteDevice.address))
                 while (!cancelled.get()) {
                     deadline()
                     val request = readPacket(connection.inputStream)
                     if ((request[0].toInt() and 0xff) == 0x02 || (request[0].toInt() and 0xff) == 0x82) completed = false
                     val response = NativeBridge.nativeBluetoothReceiverPacket(receiver, request)
-                        ?: error("Bluetooth receiver stopped.")
+                        ?: error(context.getString(R.string.bluetooth_receiver_stopped))
                     connection.outputStream.write(response); connection.outputStream.flush()
                     if ((response[0].toInt() and 0xff) >= 0xc0)
                         log("warn", "Bluetooth request rejected: opcode ${(request[0].toInt() and 0xff).toString(16)}, status ${(response[0].toInt() and 0xff).toString(16)}")
@@ -113,7 +113,7 @@ internal class BluetoothBridge(
                         completed = true
                         val file = JSONObject(result)
                         log("info", "Bluetooth received ${file.optString("name")}: ${file.optLong("bytes")} bytes, SHA256 ${file.optString("sha256")}")
-                        progress("Received ${file.optString("name")} (${file.optLong("bytes")} bytes). Choose where to import it.")
+                        progress(context.getString(R.string.bluetooth_received, file.optString("name"), file.optLong("bytes")))
                         received(file)
                     }
                     if ((request[0].toInt() and 0xff) == 0x81) break
@@ -121,21 +121,18 @@ internal class BluetoothBridge(
             } catch (error: java.io.IOException) {
                 if (!completed) throw error
                 log("info", "Bluetooth peer closed after a completed file transfer.")
-            } catch (error: IllegalStateException) {
-                if (!completed || error.message != "Bluetooth peer disconnected.") throw error
-                log("info", "Bluetooth peer closed after a completed file transfer.")
             } finally { if (receiver != 0L) NativeBridge.nativeBluetoothReceiverClose(receiver) }
         }
     }
 
     private fun begin(action: () -> Unit) {
-        check(!closed.get()) { "Bluetooth bridge is closed." }
-        check(busy.compareAndSet(false, true)) { "A Bluetooth transfer is already running." }
+        check(!closed.get()) { context.getString(R.string.bluetooth_closed) }
+        check(busy.compareAndSet(false, true)) { context.getString(R.string.bluetooth_busy) }
         cancelled.set(false)
         worker.execute {
-            try { check(!cancelled.get()) { "Transfer cancelled." }; action() }
+            try { check(!cancelled.get()) { context.getString(R.string.bluetooth_cancelled) }; action() }
             catch (error: Exception) {
-                val message = if (cancelled.get()) "Bluetooth transfer cancelled." else "Bluetooth: ${error.message ?: error}"
+                val message = if (cancelled.get()) context.getString(R.string.bluetooth_cancelled) else context.getString(R.string.bluetooth_failed, error.localizedMessage ?: error.toString())
                 progress(message); log(if (cancelled.get()) "info" else "error", message)
             } finally {
                 timeout?.cancel(false); timeout = null
@@ -168,7 +165,7 @@ internal class BluetoothBridge(
         val prefix = ByteArray(3)
         readExactly(input, prefix, 0, 3)
         val length = ((prefix[1].toInt() and 0xff) shl 8) or (prefix[2].toInt() and 0xff)
-        check(length in 3..1024) { "Invalid Bluetooth packet length." }
+        check(length in 3..1024) { context.getString(R.string.bluetooth_packet_length) }
         return ByteArray(length).also { packet -> prefix.copyInto(packet); readExactly(input, packet, 3, length - 3) }
     }
 
@@ -176,7 +173,7 @@ internal class BluetoothBridge(
         var offset = start
         while (offset < start + length) {
             val count = input.read(bytes, offset, start + length - offset)
-            check(count > 0) { "Bluetooth peer disconnected." }
+            if (count <= 0) throw java.io.EOFException(context.getString(R.string.bluetooth_disconnected))
             offset += count
         }
     }

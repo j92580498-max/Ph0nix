@@ -42,19 +42,26 @@ contains several revisions; this profile accepts only the pinned R1DB001 CID49
 pair. Import validates complete containers and their sparse payload records.
 
 **Settings** controls sound, the FPS overlay, fullscreen, keeping the display awake,
-and saving/resuming K750i. Leaving the phone saves in a background worker when
-resume is enabled. Disabling resume boots from reset. Key contacts release on
+and whether K750i resumes its previous session. Leaving the phone saves its
+internal storage in a background worker. Key contacts release on
 focus loss or backgrounding. Android storage access uses document selection
 and private copies. The Internet permission is used for loopback QMP; no web
 application is started.
 
+In Android, open **Settings → App language** to switch between **System default**,
+**English**, and **Русский**. This changes the app interface, not the emulated
+phone's firmware language. Android 13 and later also offer the same selection in
+Android's per-app language settings.
+
 Desktop Settings keeps a draft until **Save**. **Cancel** or switching tabs
 discards the draft and restores any unsaved fullscreen preview.
 
-Saved files belong to the saved phone state. Disabling resume starts from the
-original prepared firmware state; re-enabling it loads the saved state and its
-files. Imported moves wait for a durable saved checkpoint before deleting the
-host source. A failed checkpoint or changed source keeps the original.
+Disabling resume boots the firmware from reset with the saved internal storage
+and settings. Enabling resume continues the saved session when available. The
+K750i entry menu in Android can export or import `phone-memory.k750mem`; an
+import always starts a fresh boot with the restored storage. Imported moves wait
+for a durable save before deleting the host source. A failed save or changed
+source keeps the original. See [storage](storage.md) for the save format.
 
 ## Developer mode and transfers
 
@@ -71,29 +78,30 @@ Stage timings include QMP, LCD decoding, rendering and PCM reception. Sampled
 engine timer costs show scheduling and service calls without changing guest
 checkpoint state. Unavailable platform counters are left unset.
 
-Open **Phone files** from the running phone's toolbar/menu. The browser uses
-the firmware's real UART0 PC Suite OBEX service to list folders and copy or
-move files. Host moves delete the original after successful verification;
-Android uses document providers and keeps the source when the provider cannot
-verify or delete it. Files are streamed with a 32 MiB transfer limit. See
-[storage.md](storage.md) for reproducible validation and format details.
+On desktop, open **Phone files** from the running phone's toolbar/menu. It
+uses the firmware's UART0 PC Suite OBEX service. On Android, stop K750i and
+wait for it to save, then open **Files > ph0nix > phone name** and choose
+**Internal memory** or **Memory Stick**. See [storage.md](storage.md) for
+validation and format details.
 
 **Bluetooth files** uses the host's actual Bluetooth adapter and the standard
 RFCOMM Object Push service. Pair devices in the operating system first.
 Android requests Bluetooth permissions when the feature is selected. Received
-files stay in a private inbox until imported into the phone; sending a phone
-file first exports it through the firmware service. Some Android systems route
+files stay in a private inbox until imported into the phone. On desktop,
+sending a phone file first exports it through the firmware service. Some Android systems route
 Object Push to their built-in receiver; **Import received file…** opens the
 document picker for these downloads. Linux receiving requires BlueZ,
 `libbluetooth.so.3` and its local SDP compatibility socket. These Bluetooth
 protocols have automated socket tests; physical RF transfers remain untested.
 This bridge does not emulate the firmware's UART3 Bluetooth controller.
 
-**Card images** creates and browses raw FAT16 images from 16 to 1024 MiB. Android
-can import/export image files with the document picker. The image filesystem
+**Card images** creates raw FAT16 images from 16 to 1024 MiB. Desktop can
+browse them in the app. Android can import and export whole card images with
+the document picker. The image filesystem
 supports folders, copy/move, import/export and deletion without loading the
-whole disk into memory. **Mounting an image in K750i firmware remains unfinished**:
-the phone uses Memory Stick Duo and its card controller is not implemented.
+whole disk into memory. The experimental K750i Memory Stick PRO Duo model uses
+these same images. Choose an image before starting the phone; see [storage.md](storage.md)
+for the image format and compatibility checks.
 
 ## Linux
 

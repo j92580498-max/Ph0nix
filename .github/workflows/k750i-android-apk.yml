@@ -1,0 +1,143 @@
+name: K750i Android APK
+on:
+  workflow_call:
+  push:
+    branches: [test/k750i-internal-storage, test/k750i-android-apk]
+    paths:
+      - '.github/workflows/k750i-android-apk.yml'
+      - 'frontends/android/**'
+      - 'native/**'
+      - 'src/db2010/development/source.py'
+      - 'dependencies/**'
+      - 'Cargo.*'
+      - '.cargo/**'
+      - 'qemu'
+permissions:
+  contents: read
+concurrency:
+  group: k750i-android-apk-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  apk:
+    if: >-
+      github.repository == 'tayga16/Ph0nix' &&
+      github.actor_id == '124491388' &&
+      github.triggering_actor == 'tayga16'
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 60
+    env:
+      PYTHONPATH: src
+      UNICORN_NO_PKG_CONFIG: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install the Android SDK and NDK
+        run: |
+          sdk="$HOME/.android/ph0nix-sdk"
+          bash frontends/android/build-support/install_test_sdk.sh "$sdk"
+          echo "ANDROID_HOME=$sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$sdk" >> "$GITHUB_ENV"
+      - name: Select a reachable Google Maven repository
+        run: |
+          pom=com/android/tools/build/gradle/8.13.1/gradle-8.13.1.pom
+          if ! curl --fail --silent --connect-timeout 7 --max-time 12 --output /dev/null "https://dl.google.com/dl/android/maven2/$pom"; then
+            for mirror in https://maven.aliyun.com/repository/google https://mirrors.huaweicloud.com/repository/maven; do
+              if curl --fail --silent --connect-timeout 7 --max-time 12 --output /dev/null "$mirror/$pom"; then
+                echo "Using Google Maven mirror: $mirror"
+                echo "FEATUREPHONE_GOOGLE_MAVEN=$mirror" >> "$GITHUB_ENV"
+                exit 0
+              fi
+            done
+            echo 'Google Maven and both mirrors are unreachable from this runner.' >&2
+            exit 1
+          fi
+      - name: Prepare the build tools and pinned QEMU source
+        run: |
+          # Self-hosted checkout can reuse the submodule from a prior job.
+          # Start from the pin when the prepared sources no longer match it.
+          if ! python3 -m db2010.development.source check; then
+            git submodule deinit -f -- qemu
+            python3 -m db2010.development.source init
+          fi
+          python3 -m venv build/android/host-tools
+          tools_tmp="$(mktemp -d "$RUNNER_TEMP/ph0nix-tools.XXXXXXXX")"
+          trap 'rm -rf -- "$tools_tmp"' EXIT
+          download_wheel() {
+            local path="$1" sha256="$2" source destination="$tools_tmp/${1##*/}"
+            for source in https://files.pythonhosted.org \
+              https://mirrors.huaweicloud.com/repository/pypi \
+              https://mirrors.aliyun.com/pypi https://mirrors.cloud.tencent.com/pypi; do
+              if curl -fsSL --connect-timeout 7 --max-time 30 --output "$destination" "$source/$path" &&
+                printf '%s  %s\n' "$sha256" "$destination" | sha256sum --check; then
+                return 0
+              fi
+            done
+            echo "Could not download the verified wheel: ${path##*/}" >&2
+            return 1
+          }
+          download_wheel packages/a3/dc/17031897dae0efacfea57dfd3a82fdd2a2aeb58e0ff71b77b87e44edc772/setuptools-80.9.0-py3-none-any.whl \
+            062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922
+          download_wheel packages/0b/2c/87f3254fd8ffd29e4c02732eee68a83a1d3c346ae39bc6822dcbcb697f2b/wheel-0.45.1-py3-none-any.whl \
+            708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248
+          build/android/host-tools/bin/python -m pip install --no-index --no-deps qemu/python/wheels/*.whl "$tools_tmp"/*.whl
+          echo 'PIP_NO_INDEX=1' >> "$GITHUB_ENV"
+          echo "$GITHUB_WORKSPACE/build/android/host-tools/bin" >> "$GITHUB_PATH"
+          echo "FEATUREPHONE_PYTHON=$GITHUB_WORKSPACE/build/android/host-tools/bin/python" >> "$GITHUB_ENV"
+          ndk="$ANDROID_HOME/ndk/29.0.14206865"
+          echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
+          # The official NDK includes an x64 Linux toolchain. CT100 needs no
+          # system package installation to get the Android cross compiler.
+          echo "FEATUREPHONE_ANDROID_CLANG=$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> "$GITHUB_ENV"
+      - name: Test the phone file service
+        run: 'cargo test --locked -p db2010-host --lib storage::'
+      - name: Test offline internal memory with K750i firmware
+        timeout-minutes: 20
+        run: |
+          work="$(mktemp -d "$RUNNER_TEMP/ph0nix-offline.XXXXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+          # Recreate Meson's Python environment after the runner cleans its checkout.
+          if ! "$FEATUREPHONE_PYTHON" -m db2010.development.build --configure --jobs 2; then
+            find build/provenance/qemu -type f -name build.log -exec tail -n 60 {} \; || true
+            exit 1
+          fi
+          python3 -m db2010.development.firmware init k750i --prefix --input-root "$work"
+          firmware="$work/fw/k750i/images/R1DB001/cid49/sony-ericsson"
+          export PH0NIX_TEST_ANDROID_OFFLINE=1
+          export PH0NIX_TEST_LCD_DIR="$PWD/build/k750i-offline-lcd"
+          if ! cargo run --locked -p db2010-host --example phone-files-resume -- \
+            "$PWD/qemu/build/qemu-system-arm" --fresh "$work/phone" \
+            "$firmware/K750_R1DB001_MAIN_EU_1_CL_RED49.mbn" \
+            "$firmware/K750_R1DB001_FS_EMEA_1_RED49.fbn"; then
+            find "$work/phone" -type f -name engine.log -exec tail -n 60 {} \; || true
+            exit 1
+          fi
+      - name: Build and test the APK
+        working-directory: frontends/android
+        run: ./gradlew --no-daemon --console=plain assembleRelease lintRelease testDebugUnitTest
+      - name: Verify and package the APK
+        run: |
+          mkdir -p dist/k750i-android
+          apk=dist/k750i-android/ph0nix-k750i-arm64.apk
+          cp frontends/android/app/build/outputs/apk/release/app-release.apk "$apk"
+          python3 frontends/android/build-support/verify_apk.py "$apk" \
+            --ndk "$ANDROID_NDK_HOME" \
+            --aapt2 "$ANDROID_HOME/build-tools/35.0.0/aapt2" \
+            --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
+            --expected-certificate-sha256 6afca99ee47fb55c27316d9c7f38f36a1ad7a19779505c49217c51c5758dc012 \
+            --report dist/k750i-android/apk-verification.json
+          cp build/android/qemu/provenance.json dist/k750i-android/engine-provenance.json
+          cd dist/k750i-android
+          sha256sum ph0nix-k750i-arm64.apk > ph0nix-k750i-arm64.apk.sha256
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ph0nix-k750i-arm64
+          path: dist/k750i-android/*
+          if-no-files-found: error

@@ -22,6 +22,7 @@ pub struct FileTools {
     diagnostics: Option<DiagnosticsHandle>,
     snapshot: FileSnapshot,
     card_info: Option<CardInfo>,
+    boot_card: Option<PathBuf>,
     due: Instant,
     status: String,
     busy: bool,
@@ -50,7 +51,7 @@ impl Default for FileTools {
     fn default() -> Self {
         let (tx, rx) = mpsc::channel();
         Self { open: false, mode: Mode::Phone, phone: None, diagnostics: None, snapshot: FileSnapshot::default(),
-            card_info: None, due: Instant::now(), status: String::new(), busy: false, move_sources: false,
+            card_info: None, boot_card: None, due: Instant::now(), status: String::new(), busy: false, move_sources: false,
             folder: String::new(), copy_source: None, copy_destination: String::new(), copy_move: false,
             card_name: "ph0nix-card".into(), card_size: 64, tx, rx, awaiting: None, address: String::new(),
             channel: 12, explicit_channel: false, bt_source: None, bt_busy: false, bt_cancel: Arc::new(AtomicBool::new(false)),
@@ -60,6 +61,7 @@ impl Default for FileTools {
 
 impl FileTools {
     pub fn is_open(&self) -> bool { self.open }
+    pub fn boot_card(&self) -> Option<&Path> { self.boot_card.as_deref() }
     pub fn open_phone(&mut self) { self.open = true; self.mode = Mode::Phone; self.due = Instant::now(); self.list(Vec::new()); }
     pub fn open_cards(&mut self) { self.open = true; self.mode = Mode::Cards; }
     pub fn open_bluetooth(&mut self) { self.open = true; self.mode = Mode::Bluetooth; }
@@ -136,7 +138,11 @@ impl FileTools {
                 if ui.selectable_label(matches!(self.mode, Mode::Bluetooth), "Bluetooth").clicked() { self.mode = Mode::Bluetooth; }
             });
             ui.separator();
-            match self.mode { Mode::Cards => self.cards(ui), Mode::Bluetooth => self.bluetooth(ui), _ => self.browser(ui) }
+            match self.mode {
+                Mode::Cards => self.cards(ui),
+                Mode::Bluetooth => self.bluetooth(ui),
+                _ => self.browser(ui, worker),
+            }
             ui.separator(); ui.label(&self.status);
         });
         self.open = open;
@@ -172,11 +178,25 @@ impl FileTools {
         }
     }
 
-    fn browser(&mut self, ui: &mut egui::Ui) {
-        if let Mode::Card(image) = &self.mode {
+    fn browser(&mut self, ui: &mut egui::Ui, worker: Option<&Worker>) {
+        if let Mode::Card(image) = self.mode.clone() {
             ui.label(image.file_name().unwrap_or_default().to_string_lossy());
             if let Some(info) = &self.card_info { ui.label(format!("FAT16 · {:.1} MiB free", info.free_bytes as f64 / 1048576.0)); }
-            ui.label(RichText::new("Image files. The K750i Memory Stick controller mount is under development.").small());
+            if let Some(inserted) = worker.and_then(Worker::inserted_memory_stick) {
+                if inserted == image.as_path() {
+                    ui.label("Memory Stick inserted. Stop the phone to change it.");
+                    if ui.button("Browse in Phone files").clicked() { self.open_phone(); }
+                    return;
+                }
+            }
+            if worker.is_none() && !self.busy && self.card_info.is_some() {
+                if self.boot_card.as_ref() == Some(&image) {
+                    ui.label("Selected for the next K750i boot.");
+                    if ui.button("Start without a Memory Stick").clicked() { self.boot_card = None; }
+                } else if ui.button("Use for the next K750i boot").clicked() {
+                    self.boot_card = Some(image);
+                }
+            }
         }
         ui.monospace(format!("/{}", self.snapshot.path.join("/")));
         let path = self.snapshot.path.clone();
@@ -253,7 +273,11 @@ impl FileTools {
 
     fn cards(&mut self, ui: &mut egui::Ui) {
         ui.label("Raw FAT16 images, 16–1024 MiB.");
-        ui.label("The K750i Memory Stick controller mount is under development. Browse or transfer image files here.");
+        ui.label("Open an image and select it before starting K750i.");
+        if let Some(image) = &self.boot_card {
+            ui.label(format!("Selected: {}", image.display()));
+            if ui.button("Clear selection").clicked() { self.boot_card = None; }
+        }
         ui.horizontal(|ui| {
             ui.text_edit_singleline(&mut self.card_name);
             ui.add(egui::DragValue::new(&mut self.card_size).clamp_range(16..=1024).suffix(" MiB"));
@@ -366,6 +390,7 @@ fn card_request(image: &Path, request: FileRequest) -> anyhow::Result<(PathBuf, 
         FileRequest::MakeDirectory { path } => { card.make_directory(&path)?; path[..path.len()-1].to_vec() },
         FileRequest::Delete { path } => { card.delete(&path)?; path[..path.len()-1].to_vec() },
         FileRequest::DeleteVerified { path, bytes, sha256 } => { card.delete_verified(&path, bytes, &sha256)?; path[..path.len()-1].to_vec() },
+        FileRequest::ImportInternal { .. } => anyhow::bail!("Start K750i to import to its internal storage"),
         FileRequest::Disconnect => Vec::new(),
     };
     let entries = card.list(&path)?; let info = card.info()?;

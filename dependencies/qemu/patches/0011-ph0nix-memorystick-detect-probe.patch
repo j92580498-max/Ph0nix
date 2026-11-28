@@ -1,0 +1,943 @@
+diff --git a/hw/arm/db2010-checkpoint.c b/hw/arm/db2010-checkpoint.c
+index deb5a2bf8e886744d0131854b4efb0ae4f872a1f..cac1c875cf8c62ad6ffcd9f8ef86e226b9cb7ed4 100644
+--- a/hw/arm/db2010-checkpoint.c
++++ b/hw/arm/db2010-checkpoint.c
+@@ -380,6 +380,11 @@ static bool checkpoint_load(QEMUFile *f, void *pv, size_t size,
+ static bool checkpoint_save(QEMUFile *f, void *pv, size_t size,
+                             const VMStateField *field, JSONWriter *vmdesc, Error **errp)
+ {
++    DB2010MachineState *s = pv;
++    if (s->bank->memorystick_probe) {
++        error_setg(errp, "DB2010 checkpoint with a Memory Stick insertion cannot be saved");
++        return false;
++    }
+     Checkpoint context = {.file = f};
+     if (runstate_is_running() || !cp_machine(&context, pv)) {
+         error_setg(errp, "DB2010 checkpoint requires valid stopped state"); return false;
+diff --git a/hw/arm/db2010-components.h b/hw/arm/db2010-components.h
+index 93bf1c9f1db6a36e62b4f3b447001596ce38c729..62f643b109b5b01f5f7638cbcbe75ba7b45712e1 100644
+--- a/hw/arm/db2010-components.h
++++ b/hw/arm/db2010-components.h
+@@ -5,6 +5,7 @@
+ #include "db2010-keypad.h"
+ #include "db2010-bus.h"
+ #include "db2010-timer.h"
++#include "db2010-memorystick.h"
+ typedef struct DB2010F500Control DB2010F500Control;
+ typedef struct DB2010Nand DB2010Nand;
+ #include "db2010-dma.h"
+@@ -108,6 +109,10 @@ typedef struct DB2010RegisterBank {
+     bool has_serial, data_uart_flow;
+     uint32_t serial_levels;
+     bool has_memorystick_slot;
++    bool memorystick_probe, memorystick_present, memorystick_detect_pending;
++    uint32_t memorystick_probe_accesses;
++    uint16_t memorystick_probe_command;
++    DB2010MemoryStick memorystick;
+     bool has_f500;
+     uint64_t f500_commands;
+     DB2010Timer *timer;
+@@ -217,6 +222,8 @@ void db2010_display_stream_init(DB2010Display *s);
+ bool db2010_display_stream_enabled(DB2010Display *s);
+ void db2010_fa_reset(DB2010FaLink *s);
+ void dbreg_reset(DB2010RegisterBank *s);
++bool dbreg_memorystick_probe(DB2010RegisterBank *s, bool present);
++bool dbreg_memorystick_ready(DB2010RegisterBank *s);
+ void dbfc_export(DB2010F500Control *model, QDict *snapshot);
+ void db2010_startup_export(DB2010Startup *model, QDict *snapshot);
+ void db2010_fa_dma_export(DB2010FaLink *model, QDict *snapshot);
+diff --git a/hw/arm/db2010-device.c b/hw/arm/db2010-device.c
+index 41a0a77d248241c1568d555153976d24ec3f2806..1a9e6284ed3bc63ce7a70b873e1b0f0306f8664d 100644
+--- a/hw/arm/db2010-device.c
++++ b/hw/arm/db2010-device.c
+@@ -329,6 +329,7 @@ static void finalize_body(DB2010DeviceBody *b)
+     switch (b->spec->id) {
+     case DBDEV_BANK: {
+         DB2010RegisterBank *s = b->model;
++        dbms_close(&s->memorystick);
+         if (s->registers) {
+             for (unsigned i = 0; i < s->registers->len; i++) {
+                 DB2010Register *r = g_ptr_array_index(s->registers, i);
+diff --git a/hw/arm/db2010-memorystick.c b/hw/arm/db2010-memorystick.c
+new file mode 100644
+index 0000000000000000000000000000000000000000..c4390d31a6158281a01ee2805e99c4e3e7890166
+--- /dev/null
++++ b/hw/arm/db2010-memorystick.c
+@@ -0,0 +1,399 @@
++/* Memory Stick PRO card and DB2010 programmed I/O controller.
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++#include "qemu/osdep.h"
++#include "qapi/error.h"
++#include "qemu/bswap.h"
++#include "qemu/units.h"
++#include <glib/gstdio.h>
++#ifdef _WIN32
++#include <io.h>
++#else
++#include <sys/file.h>
++#endif
++#include "db2010-memorystick.h"
++
++/* Controller status is distinct from the card's GET_INT response. */
++enum { MS_COMPLETE = 0x80, MS_EVENT = 0x40, MS_ERROR = 0x02 };
++enum { CARD_CED = 0x80, CARD_ERR = 0x40, CARD_BREQ = 0x20, CARD_NAK = 1 };
++enum { CARD_READ = 0x20, CARD_WRITE = 0x21, CARD_ATTR = 0x24, CARD_STOP = 0x25 };
++#define ATTR_SECTORS 64
++#define BLOCK_SECTORS 64
++#define MAX_FIFO 16
++
++static bool lock_image(int fd)
++{
++#ifdef _WIN32
++    OVERLAPPED range = {0};
++    return LockFileEx((HANDLE)_get_osfhandle(fd),
++                      LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
++                      0, MAXDWORD, MAXDWORD, &range);
++#else
++    return flock(fd, LOCK_EX | LOCK_NB) == 0;
++#endif
++}
++
++bool dbms_open(DB2010MemoryStick *ms, const char *path, Error **errp)
++{
++    if (ms->image) {
++        error_setg(errp, "A Memory Stick image is already attached");
++        return false;
++    }
++    int flags = O_RDWR;
++#ifdef _WIN32
++    flags |= O_BINARY;
++#else
++    flags |= O_NONBLOCK;
++#endif
++    int fd = g_open(path, flags, 0);
++    if (fd < 0) {
++        error_setg_errno(errp, errno, "Opening Memory Stick image");
++        return false;
++    }
++    struct stat st;
++    if (fstat(fd, &st) || !S_ISREG(st.st_mode) || st.st_size < 16 * MiB ||
++        st.st_size > GiB || st.st_size % (BLOCK_SECTORS * DBMS_SECTOR)) {
++        error_setg(errp, "Memory Stick image must be a regular raw image of 16 MiB to 1 GiB, aligned to 32 KiB");
++        close(fd);
++        return false;
++    }
++    if (!lock_image(fd)) {
++        error_setg(errp, "Memory Stick image is in use");
++        close(fd);
++        return false;
++    }
++    FILE *file = fdopen(fd, "r+b");
++    if (!file) {
++        error_setg_errno(errp, errno, "Opening Memory Stick image stream");
++        close(fd);
++        return false;
++    }
++    ms->image = file;
++    ms->sectors = st.st_size / DBMS_SECTOR;
++    return true;
++}
++
++void dbms_close(DB2010MemoryStick *ms)
++{
++    if (ms->image) {
++        fclose(ms->image);
++    }
++    *ms = (DB2010MemoryStick){0};
++}
++
++void dbms_reset(DB2010MemoryStick *ms, uint16_t control, uint16_t enable)
++{
++    FILE *file = ms->image;
++    uint32_t sectors = ms->sectors;
++    *ms = (DB2010MemoryStick){
++        .image = file, .sectors = sectors, .control = control, .enable = enable,
++        .card_int = CARD_CED, .read_offset = 2, .read_size = 6,
++        .write_offset = 0x10, .write_size = 1,
++    };
++    ms->regs[4] = 1; /* MS PRO, category memory, class read/write. */
++    ms->regs[0x10] = 0x80; /* Serial mode at power-on. */
++}
++
++static void card_event(DB2010MemoryStick *ms, uint8_t bits)
++{
++    ms->card_int = bits;
++    ms->status |= MS_EVENT;
++}
++
++static void card_command(DB2010MemoryStick *ms, uint8_t command,
++                         uint16_t count, uint32_t address)
++{
++    /* R1DB001 sends a byte offset for READ_ATRB and sector numbers for
++     * READ_DATA and WRITE_DATA. */
++    const bool attr = command == CARD_ATTR;
++    const uint32_t lba = attr ? address / DBMS_SECTOR : address;
++    ms->last_card_command = command;
++    ms->last_card_count = count;
++    ms->last_card_address = address;
++    ms->operation = 0;
++    ms->remaining = 0;
++    uint32_t limit = attr ? ATTR_SECTORS : ms->sectors;
++    switch (command) {
++    case CARD_READ: case CARD_WRITE: case CARD_ATTR:
++        if (!count || (attr && address % DBMS_SECTOR) || lba >= limit ||
++            count > limit - lba) {
++            card_event(ms, CARD_CED | CARD_ERR);
++            break;
++        }
++        ms->operation = command;
++        ms->lba = lba;
++        ms->remaining = count;
++        card_event(ms, CARD_BREQ);
++        break;
++    case CARD_STOP:
++    case 0x10: /* Memory Stick RESET. */
++        card_event(ms, CARD_CED);
++        break;
++    default:
++        card_event(ms, CARD_CED | CARD_NAK);
++        break;
++    }
++}
++
++static void attribute_sector(DB2010MemoryStick *ms)
++{
++    memset(ms->rx, 0, sizeof(ms->rx));
++    if (ms->lba == 0) {
++        stw_be_p(ms->rx, 0xa5c3);
++        stw_be_p(ms->rx + 2, 0x0100);
++        ms->rx[4] = 1;
++        stl_be_p(ms->rx + 0x10, 0x200); /* R1DB001 expects a separate sector. */
++        stl_be_p(ms->rx + 0x14, 0x60);
++        ms->rx[0x18] = 0x10; /* System Information. */
++    } else if (ms->lba == 1) {
++        uint16_t blocks = ms->sectors / BLOCK_SECTORS;
++        ms->rx[0] = 2;
++        stw_be_p(ms->rx + 2, BLOCK_SECTORS);
++        stw_be_p(ms->rx + 4, blocks);
++        stw_be_p(ms->rx + 6, blocks);
++        stw_be_p(ms->rx + 8, DBMS_SECTOR);
++        stw_be_p(ms->rx + 0x2c, DBMS_SECTOR);
++        memcpy(ms->rx + 0x40, "Ph0nix MS PRO", 13);
++    }
++}
++
++static bool sync_image(FILE *image)
++{
++    if (fflush(image)) {
++        return false;
++    }
++#ifdef _WIN32
++    return _commit(fileno(image)) == 0;
++#else
++    return fsync(fileno(image)) == 0;
++#endif
++}
++
++static bool data_sector(DB2010MemoryStick *ms, bool write)
++{
++    clearerr(ms->image);
++    if (fseek(ms->image, (long)ms->lba * DBMS_SECTOR, SEEK_SET)) {
++        return false;
++    }
++    if (!write) {
++        return fread(ms->rx, 1, DBMS_SECTOR, ms->image) == DBMS_SECTOR;
++    }
++    return fwrite(ms->tx, 1, DBMS_SECTOR, ms->image) == DBMS_SECTOR &&
++           sync_image(ms->image);
++}
++
++static void sector_done(DB2010MemoryStick *ms, bool ok)
++{
++    if (ok) {
++        switch (ms->operation) {
++        case CARD_READ: ms->reads++; break;
++        case CARD_WRITE: ms->writes++; break;
++        case CARD_ATTR: ms->attributes++; break;
++        }
++        ms->lba++;
++        if (--ms->remaining) {
++            /* The attribute reader drains the whole request before it reads
++             * another GET_INT; keep the controller IRQ enabled for each TPC. */
++            if (ms->operation != CARD_ATTR) {
++                card_event(ms, CARD_BREQ);
++            }
++            return;
++        }
++    }
++    ms->operation = 0;
++    ms->remaining = 0;
++    card_event(ms, CARD_CED | (ok ? 0 : CARD_ERR));
++}
++
++static void complete(DB2010MemoryStick *ms, bool ok)
++{
++    ms->active_tpc = 0;
++    ms->status |= MS_COMPLETE | (ok ? 0 : MS_ERROR);
++}
++
++static void consume_tx(DB2010MemoryStick *ms)
++{
++    unsigned tpc = ms->active_tpc >> 12;
++    unsigned n = ms->active_tpc & 0xfff;
++    if (!ms->active_tpc || ms->tx_len < n) {
++        return;
++    }
++    bool ok = ms->tx_len == n;
++    if (ok) {
++        switch (tpc) {
++        case 8: /* SET_RW_REG_ADRS */
++            ms->read_offset = ms->tx[0];
++            ms->read_size = ms->tx[1];
++            ms->write_offset = ms->tx[2];
++            ms->write_size = ms->tx[3];
++            break;
++        case 9: /* EX_SET_CMD: command, big-endian count and address. */
++            card_command(ms, ms->tx[0], lduw_be_p(ms->tx + 1), ldl_be_p(ms->tx + 3));
++            break;
++        case 0xb: /* WRITE_REG */
++            ok = n <= ms->write_size && ms->write_offset >= 0x10 &&
++                 ms->write_offset + n <= sizeof(ms->regs);
++            if (ok) {
++                memcpy(ms->regs + ms->write_offset, ms->tx, n);
++            }
++            break;
++        case 0xd:
++            ok = ms->remaining && ms->operation == CARD_WRITE;
++            if (ok) {
++                ok = data_sector(ms, true);
++                sector_done(ms, ok);
++            }
++            break;
++        case 0xe: /* SET_CMD uses parameters previously written to the registers. */
++            card_command(ms, ms->tx[0], lduw_be_p(ms->regs + 0x11),
++                         ldl_be_p(ms->regs + 0x13));
++            break;
++        default:
++            ok = false;
++            break;
++        }
++    }
++    ms->tx_len = 0;
++    complete(ms, ok);
++}
++
++static void issue_tpc(DB2010MemoryStick *ms, uint16_t value)
++{
++    ms->last_tpc = value;
++    if (!ms->first_tpc) {
++        ms->first_tpc = value;
++    }
++    ms->active_tpc = value;
++    ms->rx_pos = ms->rx_len = 0;
++    unsigned n = value & 0xfff;
++    switch (value >> 12) {
++    case 2: /* READ_LONG_DATA */
++        if (n == DBMS_SECTOR && ms->remaining &&
++            (ms->operation == CARD_ATTR || ms->operation == CARD_READ)) {
++            if (ms->operation == CARD_ATTR) {
++                attribute_sector(ms);
++            } else if (!data_sector(ms, false)) {
++                sector_done(ms, false);
++                /* Let the firmware finish draining the failed transfer. */
++                memset(ms->rx, 0, sizeof(ms->rx));
++                ms->rx_len = n;
++                complete(ms, false);
++                return;
++            }
++            ms->rx_len = n;
++            return;
++        }
++        break;
++    case 3: /* READ_SHORT_DATA */
++        if (n == 32) {
++            memset(ms->rx, 0, n);
++            ms->rx_len = n;
++            return;
++        }
++        break;
++    case 4: /* READ_REG */
++        if (n && n <= ms->read_size && ms->read_offset + n <= sizeof(ms->regs)) {
++            ms->regs[1] = ms->card_int;
++            memcpy(ms->rx, ms->regs + ms->read_offset, n);
++            ms->rx_len = n;
++            return;
++        }
++        break;
++    case 7: /* GET_INT */
++        if (n == 1) {
++            ms->rx[0] = ms->card_int;
++            ms->rx_len = n;
++            return;
++        }
++        break;
++    case 8: case 9: case 0xb: case 0xd: case 0xe:
++        if (value == 0x8004 || value == 0x9007 || value == 0xd200 ||
++            value == 0xe001 || ((value >> 12) == 0xb && n && n <= 16)) {
++            consume_tx(ms);
++            return;
++        }
++        break;
++    }
++    if ((value >> 12) < 8 && n && n <= sizeof(ms->rx)) {
++        memset(ms->rx, 0, n);
++        ms->rx_len = n;
++    }
++    ms->tx_len = 0;
++    complete(ms, false);
++}
++
++const char *dbms_access(DB2010MemoryStick *ms, DB2010Timer *timer, DB2010Access *a)
++{
++    uint32_t offset = a->address - DBMS_BASE;
++    if (a->size != ((offset == 0x20 || offset == 0x24) ? 4 : 2)) {
++        return "memorystick_register_width_unmodeled";
++    }
++    unsigned mode, n;
++    switch (offset) {
++    case 0x00:
++        if (!a->write) { break; }
++        if (a->commit) { issue_tpc(ms, a->value); }
++        goto done;
++    case 0x08:
++        if (!a->write) { a->value = ms->control; }
++        else if (a->commit) { ms->control = a->value; }
++        goto done;
++    case 0x0c:
++        if (!a->write) { a->value = ms->status; }
++        else if (a->commit) { ms->status &= ~a->value; }
++        goto done;
++    case 0x10:
++        if (!a->write) { a->value = ms->enable; }
++        else if (a->commit) { ms->enable = a->value; }
++        goto done;
++    case 0x1c:
++        if (!a->write) { a->value = ms->fifo_mode; }
++        else if (a->commit) { ms->fifo_mode = a->value; }
++        goto done;
++    case 0x20:
++        if (a->write) { break; }
++        mode = ms->fifo_mode & 3;
++        if (mode && mode != 3) { return "memorystick_rx_mode_unmodeled"; }
++        n = MIN(mode + 1, ms->rx_len - ms->rx_pos);
++        a->value = 0;
++        for (unsigned i = 0; i < n; i++) {
++            a->value |= (uint32_t)ms->rx[ms->rx_pos + i] << (i * 8);
++        }
++        if (a->commit && n) {
++            ms->rx_pos += n;
++            if (ms->active_tpc && ms->rx_pos == ms->rx_len) {
++                if (ms->active_tpc == 0x2200) { sector_done(ms, true); }
++                complete(ms, true);
++            }
++        }
++        goto done;
++    case 0x24:
++        if (!a->write) { break; }
++        mode = (ms->fifo_mode >> 4) & 3;
++        if (mode && mode != 3) { return "memorystick_tx_mode_unmodeled"; }
++        n = mode + 1;
++        if (ms->tx_len + n > (ms->active_tpc ? sizeof(ms->tx) : MAX_FIFO)) {
++            return "memorystick_tx_overrun";
++        }
++        if (a->commit) {
++            for (unsigned i = 0; i < n; i++) {
++                ms->tx[ms->tx_len++] = a->value >> (i * 8);
++            }
++            consume_tx(ms);
++        }
++        goto done;
++    case 0x2c:
++        if (a->write) { break; }
++        /* An active transfer consumes TX bytes as they arrive and refills RX. */
++        a->value = MIN(MAX_FIFO, ms->rx_len - ms->rx_pos) |
++                   ((ms->active_tpc ? 0 : ms->tx_len) << 8);
++        goto done;
++    }
++    return "memorystick_register_access_unmodeled";
++
++done:
++    if (a->commit && timer) {
++        dbtimer_set_line(timer, DBIRQ_MEMORYSTICK,
++                         (ms->enable & MS_COMPLETE) && ms->status);
++    }
++    return NULL;
++}
+diff --git a/hw/arm/db2010-memorystick.h b/hw/arm/db2010-memorystick.h
+new file mode 100644
+index 0000000000000000000000000000000000000000..96e2f3f5048224492470b07872d39141e4a4506f
+--- /dev/null
++++ b/hw/arm/db2010-memorystick.h
+@@ -0,0 +1,33 @@
++/* Memory Stick PRO card and DB2010 programmed I/O controller.
++ * SPDX-License-Identifier: GPL-2.0-or-later */
++#ifndef DB2010_MEMORYSTICK_H
++#define DB2010_MEMORYSTICK_H
++
++#include "db2010-bus.h"
++#include "db2010-timer.h"
++
++#define DBMS_BASE 0xfc010000u
++#define DBMS_SECTOR 512
++
++typedef struct DB2010MemoryStick {
++    FILE *image;
++    uint32_t sectors;
++    uint64_t reads, writes, attributes;
++    uint16_t control, status, enable, fifo_mode;
++    uint16_t first_tpc, active_tpc, last_tpc;
++    uint16_t rx_pos, rx_len, tx_len;
++    uint8_t tx[DBMS_SECTOR], rx[DBMS_SECTOR];
++    uint8_t read_offset, read_size, write_offset, write_size;
++    uint8_t regs[32], card_int, operation;
++    uint32_t lba;
++    uint16_t remaining, last_card_count;
++    uint32_t last_card_address;
++    uint8_t last_card_command;
++} DB2010MemoryStick;
++
++bool dbms_open(DB2010MemoryStick *ms, const char *path, Error **errp);
++void dbms_reset(DB2010MemoryStick *ms, uint16_t control, uint16_t enable);
++void dbms_close(DB2010MemoryStick *ms);
++const char *dbms_access(DB2010MemoryStick *ms, DB2010Timer *timer, DB2010Access *a);
++
++#endif
+diff --git a/hw/arm/db2010-observe.c b/hw/arm/db2010-observe.c
+index 8691239f9249a0a97785fb2b2bba35a3415fa67e..f1c5cee1399462b04db2a70b0906f27caa0cfa89 100644
+--- a/hw/arm/db2010-observe.c
++++ b/hw/arm/db2010-observe.c
+@@ -206,7 +206,7 @@ char *get_snapshot(Object *obj, Error **errp)
+     if (s->bank->has_memorystick_slot) {
+         QDict *slot = qdict_new();
+         qdict_put_str(slot, "profile", "gpio42-empty-slot");
+-        qdict_put_bool(slot, "card_present", false);
++        qdict_put_bool(slot, "card_present", s->bank->memorystick_present);
+         qdict_put_int(slot, "detect_port", 4);
+         qdict_put_int(slot, "detect_mask", 4);
+         qdict_put_bool(slot, "direction_sensitive", true);
+diff --git a/hw/arm/db2010-register-bank.c b/hw/arm/db2010-register-bank.c
+index 447c5d3e0431a6e7b2f549300fc33b59cf4ffbdb..084464f879ece8316494abc060f977594c95c14a 100644
+--- a/hw/arm/db2010-register-bank.c
++++ b/hw/arm/db2010-register-bank.c
+@@ -5,6 +5,50 @@
+ #include "qobject/qdict.h"
+ #include "qobject/qlist.h"
+ 
++#define MS_DETECT_PIN 4
++#define MS_GPIO_DIRECTION 0xf900002a
++#define MS_GPIO_ENABLE 0xf900002c
++#define MS_GPIO_POLARITY 0xf900002e
++#define MS_GPIO_PENDING 0xf9000030
++
++/* Only GPIO42 is driven; the firmware's output latch and neighboring bits
++ * remain independent of the mechanical switch. */
++bool dbreg_memorystick_ready(DB2010RegisterBank *s)
++{
++    if (!s->has_memorystick_slot || !s->timer) {
++        return false;
++    }
++    DB2010Register *direction = dbreg_find(s, MS_GPIO_DIRECTION);
++    DB2010Register *enable = dbreg_find(s, MS_GPIO_ENABLE);
++    DB2010Register *polarity = dbreg_find(s, MS_GPIO_POLARITY);
++    return direction && enable && polarity &&
++        dbreg_known(direction) && dbreg_known(enable) && dbreg_known(polarity) &&
++        direction->width == 2 && enable->width == 2 && polarity->width == 2;
++}
++
++bool dbreg_memorystick_probe(DB2010RegisterBank *s, bool present)
++{
++    if (!dbreg_memorystick_ready(s)) {
++        return false;
++    }
++    if (s->memorystick_present == present) {
++        return true;
++    }
++    s->memorystick_probe = true;
++    s->memorystick_present = present;
++    DB2010Register *direction = dbreg_find(s, MS_GPIO_DIRECTION);
++    DB2010Register *enable = dbreg_find(s, MS_GPIO_ENABLE);
++    DB2010Register *polarity = dbreg_find(s, MS_GPIO_POLARITY);
++    /* A set polarity bit watches for the high-to-low transition. */
++    if (!(direction->value & MS_DETECT_PIN) &&
++        (enable->value & MS_DETECT_PIN) &&
++        !!(polarity->value & MS_DETECT_PIN) == present) {
++        s->memorystick_detect_pending = true;
++        dbtimer_set_line(s->timer, DBIRQ_MEMORYSTICK_DETECT, true);
++    }
++    return true;
++}
++
+ static const char *bank_action(void *opaque, const DB2010DecodedAccess *d,
+                                DB2010Access *a)
+ {
+@@ -48,7 +92,10 @@ static const char *bank_action(void *opaque, const DB2010DecodedAccess *d,
+         }
+         if (s->has_memorystick_slot && a->address == 0xf9000028) {
+             DB2010Register *direction = dbreg_find(s, 0xf900002a);
+-            if (!(direction->value & 4)) { a->value |= 4; }
++            if (!(direction->value & MS_DETECT_PIN)) {
++                a->value = (a->value & ~MS_DETECT_PIN) |
++                    (s->memorystick_present ? 0 : MS_DETECT_PIN);
++            }
+         }
+         if (r->f500_lowbyte_alias && a->size == 1) { a->value &= 255; }
+         return NULL;
+@@ -78,6 +125,11 @@ static const char *bank_action(void *opaque, const DB2010DecodedAccess *d,
+         r->value = value & (UINT32_MAX >> (8 * (4 - r->width)));
+         r->known_mask = UINT32_MAX >> (8 * (4 - r->width));
+     }
++    if (s->memorystick_probe && a->address == MS_GPIO_ENABLE &&
++        !(value & MS_DETECT_PIN)) {
++        s->memorystick_detect_pending = false;
++        dbtimer_set_line(s->timer, DBIRQ_MEMORYSTICK_DETECT, false);
++    }
+     if (s->has_f500 && a->address == 0xf500081c) { s->f500_commands++; }
+     if (s->timer != NULL) {
+         dbtimer_observe(s->timer, a->address, r->value);
+@@ -107,11 +159,34 @@ const DB2010RegMap *dbreg_map(DB2010Register *r)
+ 
+ const char *db2010_bank_access(void *opaque, DB2010Access *a)
+ {
+-    DB2010Register *r = dbreg_find(opaque, a->address);
++    DB2010RegisterBank *s = opaque;
++    if (s->memorystick_probe && a->address == MS_GPIO_PENDING &&
++        a->size == 2 && !a->write) {
++        a->value = s->memorystick_detect_pending ? MS_DETECT_PIN : 0;
++        return NULL;
++    }
++    if (s->memorystick_present && s->memorystick.image &&
++        (a->address >> 12) == (DBMS_BASE >> 12)) {
++        const char *fault = dbms_access(&s->memorystick, s->timer, a);
++        if (!fault && a->commit) { s->memorystick_probe_accesses++; }
++        return fault;
++    }
++    if (s->memorystick_present && a->address == DBMS_BASE &&
++        a->size == 2 && a->write) {
++        /* Stop before issuing the TPC: the probe has no card media. Record
++         * the command because the rejected write won't reach MMIO commit. */
++        s->memorystick_probe_command = a->value;
++        return "memorystick_probe_first_command";
++    }
++    DB2010Register *r = dbreg_find(s, a->address);
+     if (!r) { return "device_register_access_unmodeled"; }
+     DB2010DecodedAccess d;
+     const char *fault = db2010_reg_decode(dbreg_map(r), a, &d);
+-    if (!fault) { fault = db2010_reg_execute(opaque, &d, a); }
++    if (!fault) { fault = db2010_reg_execute(s, &d, a); }
++    if (!fault && a->commit && s->memorystick_present &&
++        (a->address >> 12) == 0xfc010) {
++        s->memorystick_probe_accesses++;
++    }
+     return fault;
+ }
+ 
+@@ -145,11 +220,20 @@ DB2010Register *dbreg_find(DB2010RegisterBank *bank, uint32_t address)
+ void dbreg_reset(DB2010RegisterBank *s)
+ {
+     s->f500_commands = 0;
++    s->memorystick_probe = false;
++    s->memorystick_present = s->memorystick.image != NULL;
++    s->memorystick_detect_pending = false;
++    s->memorystick_probe_accesses = 0;
++    s->memorystick_probe_command = 0;
+     for (unsigned i = 0; i < s->registers->len; i++) {
+         DB2010Register *r = g_ptr_array_index(s->registers, i);
+         r->value = r->initial;
+         r->known_mask = r->initial_known ? UINT32_MAX >> (8 * (4 - r->width)) : 0;
+     }
++    if (s->memorystick_present) {
++        dbms_reset(&s->memorystick, dbreg_find(s, DBMS_BASE + 8)->value,
++                   dbreg_find(s, DBMS_BASE + 0x10)->value);
++    }
+ }
+ 
+ void dbreg_export(DB2010RegisterBank *model, QDict *snapshot)
+diff --git a/hw/arm/db2010-timer.c b/hw/arm/db2010-timer.c
+index 671b49eae2aadff7dc3db6b8dac17f8c236e70bd..b8a6659824e146cbc6e3620c92d131e000e84ed2 100644
+--- a/hw/arm/db2010-timer.c
++++ b/hw/arm/db2010-timer.c
+@@ -93,10 +93,34 @@ static bool data_uart_routed(const DB2010Timer *t)
+         t->state.masks_known[0] && t->state.masks_known[1] &&
+         !(t->state.masks[0] & (1u << 28)) && !(t->state.masks[1] & (1u << 16));
+ }
++/* GPIO4 compact line 69 belongs to bank 2, line 9, cascade 30. */
++static bool memorystick_detect_routed(const DB2010Timer *t)
++{
++    return t->state.memorystick_detect_pending && !t->state.selected &&
++        t->state.masks_known[0] && t->state.masks_known[2] &&
++        !(t->state.masks[0] & (1u << 30)) && !(t->state.masks[2] & (1u << 9));
++}
++
++/* Memory Stick controller compact line 76, level-triggered. */
++static bool memorystick_routed(const DB2010Timer *t)
++{
++    return t->state.memorystick_pending && !t->state.selected &&
++        t->state.masks_known[0] && t->state.masks_known[2] &&
++        !(t->state.masks[0] & (1u << 30)) && !(t->state.masks[2] & (1u << 16));
++}
++
++static bool tertiary_selected(const DB2010Timer *t)
++{
++    return t->state.i2c_selected || t->state.dma_selected ||
++           t->state.keypad_selected || t->state.memorystick_detect_selected ||
++           t->state.memorystick_selected;
++}
++
+ bool dbirq_any_routed(const DB2010Timer *t)
+ {
+     return dbirq_keypad_routed(t) || dbtimer_routed(t) || paired_timer_routed(t) || dbirq_i2c_routed(t) || dbirq_pdi_routed(t) || dbirq_dma_routed(t) || dbirq_dsp_routed(t) ||
+-        dbirq_rtc_routed(t) || sim_rx_routed(t) || sim_tx_routed(t) || bluetooth_routed(t) || data_uart_routed(t);
++        dbirq_rtc_routed(t) || sim_rx_routed(t) || sim_tx_routed(t) || bluetooth_routed(t) || data_uart_routed(t) ||
++        memorystick_detect_routed(t) || memorystick_routed(t);
+ }
+ 
+ void dbtimer_update_irq(DB2010Timer *t)
+@@ -197,6 +221,10 @@ static const char *timer_action(void *opaque, const DB2010DecodedAccess *d, DB20
+             if (t->config.i2c_route && t->state.i2c_pending && t->state.masks_known[2] && !(t->state.masks[2] & (1u << 10))) {
+                 *value |= 1u << 30;
+             }
++            if (t->state.memorystick_pending && t->state.masks_known[2] &&
++                !(t->state.masks[2] & (1u << 16))) { *value |= 1u << 30; }
++            if (t->state.memorystick_detect_pending && t->state.masks_known[2] &&
++                !(t->state.masks[2] & (1u << 9))) { *value |= 1u << 30; }
+             if (t->config.display_route && t->state.pdi_pending && t->state.masks_known[1] && !(t->state.masks[1] & (1u << 13))) { *value |= 1u << 28; }
+             if (t->config.rtc_route && t->state.rtc_pending && t->state.masks_known[1] && !(t->state.masks[1] & (1u << 15))) { *value |= 1u << 28; }
+             if (t->config.display_route && t->state.dma_pending && t->state.masks_known[2] && !(t->state.masks[2] & (1u << 17))) { *value |= 1u << 30; }
+@@ -212,7 +240,9 @@ static const char *timer_action(void *opaque, const DB2010DecodedAccess *d, DB20
+             return dbtimer_dispatch(t, &(DB2010TimerEvent){.kind = DBIRQ_READ_SELECTION, .address = d->rule->offset, .value = value});
+         case DBT_TERTIARY_PENDING:
+             if (!t->config.i2c_route && !t->config.display_route && !t->config.keypad_route) { return "timer_irq_register_unmodeled"; }
+-            *value = (t->state.keypad_pending ? 1 : 0) | (t->state.i2c_pending ? (1u << 10) : 0) | (t->state.dma_pending ? (1u << 17) : 0); break;
++            *value = (t->state.keypad_pending ? 1 : 0) | (t->state.i2c_pending ? (1u << 10) : 0) | (t->state.dma_pending ? (1u << 17) : 0) |
++                (t->state.memorystick_detect_pending ? (1u << 9) : 0) |
++                (t->state.memorystick_pending ? (1u << 16) : 0); break;
+         case DBT_TERTIARY_SELECT:
+             return dbtimer_dispatch(t, &(DB2010TimerEvent){.kind = DBIRQ_READ_SELECTION, .address = d->rule->offset, .value = value});
+         default: return "timer_irq_register_unmodeled";
+@@ -288,9 +318,9 @@ static const char *dbtimer_ack_selected(DB2010Timer *t, const DB2010TimerEvent *
+     }
+     if ((t->state.dsp_selected || t->state.sim_rx_selected) && address != 0xfb020118) { return "irq_ack_wrong_bank"; }
+     if (address != 0xfb020118) {
+-        if (address != ((t->state.i2c_selected || t->state.dma_selected || t->state.keypad_selected) ? 0xfb020318 : 0xfb020218)) { return "irq_ack_wrong_bank"; }
++        if (address != (tertiary_selected(t) ? 0xfb020318 : 0xfb020218)) { return "irq_ack_wrong_bank"; }
+         if (t->state.paired_selected) { t->state.paired_pending = false; }
+-        else if (!t->state.keypad_selected && !t->state.i2c_selected && !t->state.pdi_selected && !t->state.dma_selected && !t->state.rtc_selected && !t->state.sim_tx_selected && !t->state.bluetooth_selected && !t->state.data_uart_selected) { t->state.pending = false; }
++        else if (!t->state.keypad_selected && !t->state.i2c_selected && !t->state.pdi_selected && !t->state.dma_selected && !t->state.rtc_selected && !t->state.sim_tx_selected && !t->state.bluetooth_selected && !t->state.data_uart_selected && !t->state.memorystick_detect_selected && !t->state.memorystick_selected) { t->state.pending = false; }
+         t->state.secondary_acked = DBIRQ_SECONDARY_ACKED;
+     } else {
+         if (!t->state.secondary_acked && !t->state.dsp_selected && !t->state.sim_rx_selected) {
+@@ -302,6 +332,8 @@ static const char *dbtimer_ack_selected(DB2010Timer *t, const DB2010TimerEvent *
+         t->state.rtc_selected = false;
+         t->state.bluetooth_selected = false;
+         t->state.data_uart_selected = false;
++        t->state.memorystick_detect_selected = false;
++        t->state.memorystick_selected = false;
+         t->state.paired_selected = false;
+         t->state.i2c_selected = t->state.pdi_selected = t->state.dma_selected = t->state.dsp_selected = false;
+     }
+@@ -317,7 +349,8 @@ static const char *dbtimer_select_source(DB2010Timer *t)
+     bool keypad = dbirq_keypad_routed(t);
+     bool rtc = dbirq_rtc_routed(t);
+     bool sim_rx=sim_rx_routed(t), sim_tx=sim_tx_routed(t), bt=bluetooth_routed(t), serial=data_uart_routed(t);
+-    if (!timer && !i2c && !pdi && !dma && !dsp && !keypad && !rtc && !sim_rx && !sim_tx && !bt && !serial) {
++    bool detect = memorystick_detect_routed(t), ms = memorystick_routed(t);
++    if (!timer && !i2c && !pdi && !dma && !dsp && !keypad && !rtc && !sim_rx && !sim_tx && !bt && !serial && !detect && !ms) {
+         return "irq_entry_without_routed_source";
+     }
+     if (!t->config.unlimited_irqs && t->state.irqs >= t->config.max_irqs) {
+@@ -337,6 +370,15 @@ static const char *dbtimer_select_source(DB2010Timer *t)
+     t->state.sim_tx_selected=!other && !sim_rx && sim_tx;
+     t->state.bluetooth_selected = !other && !sim_rx && !sim_tx && bt;
+     t->state.data_uart_selected = !other && !sim_rx && !sim_tx && !bt && serial;
++    t->state.memorystick_detect_selected = !other && !sim_rx && !sim_tx &&
++                                          !bt && !serial && detect;
++    t->state.memorystick_selected = !other && !sim_rx && !sim_tx &&
++                                    !bt && !serial && !detect && ms;
++    if (t->state.memorystick_selected) { t->state.memorystick_irqs++; }
++    if (t->state.memorystick_detect_selected) {
++        t->state.memorystick_detect_pending = false; /* GPIO4 is edge-triggered. */
++        t->state.memorystick_detect_irqs++;
++    }
+     if (t->state.data_uart_selected) { t->state.data_uart_irqs++; }
+     if (t->state.bluetooth_selected) { t->state.bluetooth_irqs++; }
+     if (t->state.sim_rx_selected) { t->state.sim_rx_irqs++; }
+@@ -360,13 +402,15 @@ static const char *dbtimer_select_source(DB2010Timer *t)
+ static const char *dbtimer_read_selected(DB2010Timer *t, const DB2010TimerEvent *e)
+ {
+     if (e->address == 0xfb020310) {
+-        if (!t->state.selected || (!t->state.keypad_selected && !t->state.i2c_selected && !t->state.dma_selected)) { return "irq_selection_without_pending"; }
+-        *e->value = t->state.keypad_selected ? 0 : t->state.dma_selected ? 17 : 10;
++        if (!t->state.selected || !tertiary_selected(t)) { return "irq_selection_without_pending"; }
++        *e->value = t->state.memorystick_detect_selected ? 9 :
++            t->state.memorystick_selected ? 16 :
++            t->state.keypad_selected ? 0 : t->state.dma_selected ? 17 : 10;
+     } else {
+         if (!t->state.selected) { return "irq_selection_without_pending"; }
+-        if ((t->state.keypad_selected || t->state.i2c_selected || t->state.dma_selected || t->state.dsp_selected || t->state.sim_rx_selected) && e->address == 0xfb020210) { return "irq_selection_wrong_bank"; }
++        if ((tertiary_selected(t) || t->state.dsp_selected || t->state.sim_rx_selected) && e->address == 0xfb020210) { return "irq_selection_wrong_bank"; }
+         *e->value = t->state.data_uart_selected ? (e->address == 0xfb020110 ? 28 : 16) : t->state.bluetooth_selected ? (e->address == 0xfb020110 ? 28 : 19) : t->state.sim_rx_selected ? 5 : t->state.sim_tx_selected ? (e->address==0xfb020110 ? 28:6) : t->state.dsp_selected ? 9 : e->address == 0xfb020110 ?
+-            ((t->state.i2c_selected || t->state.dma_selected || t->state.keypad_selected) ? 30 : 28) : (t->state.rtc_selected ? 15 : t->state.pdi_selected ? 13 : t->state.paired_selected ? 26 : 25);
++            (tertiary_selected(t) ? 30 : 28) : (t->state.rtc_selected ? 15 : t->state.pdi_selected ? 13 : t->state.paired_selected ? 26 : 25);
+     }
+     return NULL;
+ }
+@@ -383,6 +427,10 @@ static const char *dbtimer_dispatch(DB2010Timer *t, const DB2010TimerEvent *e)
+     case DBIRQ_READ_SELECTION: return dbtimer_read_selected(t, e);
+     case DBIRQ_SOURCE:
+         switch (e->line) {
++        case DBIRQ_MEMORYSTICK:
++            t->state.memorystick_pending = e->level; break;
++        case DBIRQ_MEMORYSTICK_DETECT:
++            t->state.memorystick_detect_pending = e->level; break;
+         case DBIRQ_DATA_UART: t->state.data_uart_pending=e->level; break;
+         case DBIRQ_BLUETOOTH: t->state.bluetooth_pending=e->level; break;
+         case DBIRQ_SIM_RX: t->state.sim_rx_pending=e->level; break;
+@@ -529,6 +577,7 @@ void dbtimer_input(void *opaque, bool level)
+ const bool *dbtimer_input_latch(const DB2010Timer *timer, DB2010IrqLine line)
+ {
+     switch (line) {
++    case DBIRQ_MEMORYSTICK_DETECT: return &timer->state.memorystick_detect_pending;
+     case DBIRQ_DATA_UART: return &timer->state.data_uart_pending;
+     case DBIRQ_BLUETOOTH: return &timer->state.bluetooth_pending;
+     case DBIRQ_SIM_RX: return &timer->state.sim_rx_pending;
+diff --git a/hw/arm/db2010-timer.h b/hw/arm/db2010-timer.h
+index e0ead0f2b190ec06530df303eeddd7599b348d22..34c5b91bf9f4d4d692212ce08049ab68bd2fc3f0 100644
+--- a/hw/arm/db2010-timer.h
++++ b/hw/arm/db2010-timer.h
+@@ -46,6 +46,10 @@ typedef struct DB2010TimerRuntime {
+     uint64_t pdi_irqs;
+     uint64_t dma_irqs;
+     bool keypad_pending, keypad_selected;
++    bool memorystick_detect_pending, memorystick_detect_selected;
++    uint64_t memorystick_detect_irqs;
++    bool memorystick_pending, memorystick_selected;
++    uint64_t memorystick_irqs;
+     uint64_t keypad_irqs;
+     bool dsp_pending;
+     bool dsp_selected;
+@@ -109,7 +113,7 @@ typedef struct QDict QDict;
+ typedef struct QList QList;
+ void dbtimer_export(DB2010Timer *model, QDict *snapshot, QList * irq_events);
+ typedef enum DB2010IrqLine {
+-    DBIRQ_I2C, DBIRQ_PDI, DBIRQ_DMA, DBIRQ_DSP, DBIRQ_KEYPAD, DBIRQ_RTC, DBIRQ_SIM_RX, DBIRQ_SIM_TX, DBIRQ_BLUETOOTH, DBIRQ_DATA_UART,
++    DBIRQ_I2C, DBIRQ_PDI, DBIRQ_DMA, DBIRQ_DSP, DBIRQ_KEYPAD, DBIRQ_RTC, DBIRQ_SIM_RX, DBIRQ_SIM_TX, DBIRQ_BLUETOOTH, DBIRQ_DATA_UART, DBIRQ_MEMORYSTICK_DETECT, DBIRQ_MEMORYSTICK,
+ } DB2010IrqLine;
+ typedef struct DB2010IrqInput {
+     DB2010Timer *timer;
+diff --git a/hw/arm/db2010.c b/hw/arm/db2010.c
+index b3cd603ba3823db48f2e4b216115b2f498d807d9..a7cc42b2f127f01eaabe800926272e8cdeafe1e1 100644
+--- a/hw/arm/db2010.c
++++ b/hw/arm/db2010.c
+@@ -80,6 +80,88 @@ static void set_research_guards(Object *obj, bool enabled, Error **errp)
+     s->research_guards = enabled;
+ }
+ 
++static bool get_memorystick_probe_inserted(Object *obj, Error **errp)
++{
++    DB2010MachineState *s = DB2010_MACHINE(obj);
++    return s->bank && s->bank->memorystick_present;
++}
++
++static void set_memorystick_probe_inserted(Object *obj, bool present,
++                                          Error **errp)
++{
++    DB2010MachineState *s = DB2010_MACHINE(obj);
++    if (s->bank && s->bank->memorystick.image) {
++        error_setg(errp, "An image-backed Memory Stick stays inserted until the engine stops");
++        return;
++    }
++    if (!s->cpu || !dbreg_memorystick_probe(s->bank, present)) {
++        error_setg(errp, "DB2010 Memory Stick probe requires an initialized GPIO42 slot");
++    }
++}
++
++static void set_memorystick_image(Object *obj, const char *path, Error **errp)
++{
++    DB2010MachineState *s = DB2010_MACHINE(obj);
++    if (!s->cpu || !dbreg_memorystick_ready(s->bank) ||
++        s->bank->memorystick_present) {
++        error_setg(errp, "Memory Stick attachment requires an initialized, empty GPIO42 slot");
++        return;
++    }
++    DB2010Register *control = dbreg_find(s->bank, DBMS_BASE + 8);
++    DB2010Register *enable = dbreg_find(s->bank, DBMS_BASE + 0x10);
++    if (!control || !enable || !dbreg_known(control) || !dbreg_known(enable)) {
++        /* Profiles without configured controller registers cannot attach media. */
++        error_setg(errp, "Memory Stick controller registers are unavailable");
++        return;
++    }
++    DB2010MemoryStick *ms = &s->bank->memorystick;
++    if (!dbms_open(ms, path, errp)) {
++        return;
++    }
++    dbms_reset(ms, control->value, enable->value);
++    if (runstate_check(RUN_STATE_PRELAUNCH)) {
++        /* A card already in the slot is sampled as an input level at boot. */
++        s->bank->memorystick_present = true;
++    } else {
++        dbreg_memorystick_probe(s->bank, true);
++    }
++}
++
++static char *get_memorystick_probe_status(Object *obj, Error **errp)
++{
++    DB2010MachineState *s = DB2010_MACHINE(obj);
++    if (!s->bank || !s->bank->has_memorystick_slot || !s->bank->timer) {
++        error_setg(errp, "DB2010 has no GPIO42 slot");
++        return NULL;
++    }
++    g_autoptr(QDict) status = qdict_new();
++    qdict_put_bool(status, "card_present", s->bank->memorystick_present);
++    qdict_put_bool(status, "detect_pending", s->bank->memorystick_detect_pending);
++    qdict_put_int(status, "detect_irqs", s->timer->state.memorystick_detect_irqs);
++    qdict_put_int(status, "controller_accesses", s->bank->memorystick_probe_accesses);
++    DB2010MemoryStick *ms = &s->bank->memorystick;
++    qdict_put_int(status, "first_command", ms->image ? ms->first_tpc :
++                  s->bank->memorystick_probe_command);
++    qdict_put_int(status, "last_command", ms->last_tpc);
++    qdict_put_int(status, "controller_irqs", s->timer->state.memorystick_irqs);
++    qdict_put_int(status, "controller_enable", ms->enable);
++    qdict_put_int(status, "controller_status", ms->status);
++    qdict_put_int(status, "card_int", ms->card_int);
++    qdict_put_int(status, "operation", ms->operation);
++    qdict_put_int(status, "last_card_command", ms->last_card_command);
++    qdict_put_int(status, "last_card_address", ms->last_card_address);
++    qdict_put_int(status, "last_card_count", ms->last_card_count);
++    qdict_put_int(status, "sectors_remaining", ms->remaining);
++    qdict_put_int(status, "rx_available", ms->rx_len - ms->rx_pos);
++    qdict_put_int(status, "tx_bytes", ms->tx_len);
++    qdict_put_int(status, "lba", ms->lba);
++    qdict_put_int(status, "sectors_read", ms->reads);
++    qdict_put_int(status, "sectors_written", ms->writes);
++    qdict_put_int(status, "attribute_sectors_read", ms->attributes);
++    g_autoptr(GString) text = qobject_to_json(QOBJECT(status));
++    return g_strdup(text->str);
++}
++
+ static void db2010_class_init(ObjectClass *oc, const void *data)
+ {
+     MachineClass *mc = MACHINE_CLASS(oc);
+@@ -95,6 +177,11 @@ static void db2010_class_init(ObjectClass *oc, const void *data)
+     object_class_property_add_bool(oc, "research-guards", get_research_guards,
+                                     set_research_guards);
+     object_class_property_add_str(oc, "state", get_state, set_state);
++    object_class_property_add_bool(oc, "memorystick-probe-inserted",
++        get_memorystick_probe_inserted, set_memorystick_probe_inserted);
++    object_class_property_add_str(oc, "memorystick-image", NULL, set_memorystick_image);
++    object_class_property_add_str(oc, "memorystick-probe-status",
++        get_memorystick_probe_status, NULL);
+     object_class_property_add_str(oc, "snapshot", get_snapshot, NULL);
+     object_class_property_add_str(oc, "summary", get_summary, NULL);
+     object_class_property_add_str(oc, "checkpoint-layout", get_checkpoint_layout, NULL);
+diff --git a/hw/arm/meson.build b/hw/arm/meson.build
+index ed9a85b02f980ba888278bdccebd0a2c52f0772d..7bf16537c51dc604a2b3527665fa77281f62761e 100644
+--- a/hw/arm/meson.build
++++ b/hw/arm/meson.build
+@@ -30,6 +30,7 @@ arm_common_ss.add(when: 'CONFIG_DB2010', if_true: files(
+   'db2010-simif.c',
+   'db2010-operator-name.c',
+   'db2010-register-bank.c',
++  'db2010-memorystick.c',
+   'db2010-memory-contracts.c',
+   'db2010-dma.c',
+   'db2010-dsp-peer.c',

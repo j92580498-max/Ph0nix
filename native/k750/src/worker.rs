@@ -1,5 +1,6 @@
 // Derived from tayga16/SamsungE380-Emu; original Apache-2.0/MIT terms retained.
 use std::collections::VecDeque;
+use std::path::{Path, PathBuf};
 use std::sync::{atomic::{AtomicBool, AtomicU32, Ordering}, mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
@@ -24,7 +25,7 @@ pub enum WorkerEvent {
     Lcd(LcdFrame),
     Status(String),
     InputApplied(String),
-    Finished(String),
+    Finished(Result<String, String>),
 }
 
 const MAX_PENDING_EVENTS: usize = 64;
@@ -90,8 +91,12 @@ fn input_history_suffix(history: &VecDeque<String>) -> String {
     }
 }
 
+enum WorkerCommand {
+    Keys(u32), SetPaused(bool), Stop,
+}
+
 pub struct Worker {
-    input: mpsc::Sender<u32>,
+    input: mpsc::Sender<WorkerCommand>,
     last_input: AtomicU32,
     stop: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
@@ -99,6 +104,7 @@ pub struct Worker {
     pub audio: AudioBuffer,
     pub diagnostics: DiagnosticsHandle,
     pub files: PhoneFiles,
+    card: Option<PathBuf>,
 }
 
 impl Worker {
@@ -107,7 +113,32 @@ impl Worker {
     }
 
     pub fn start_with_options(paths: impl Into<FirmwareSelection>, options: Option<HostOptions>) -> std::io::Result<Self> {
+        Self::start_with_card(paths, options, None, None)
+    }
+
+    pub fn start_with_card(paths: impl Into<FirmwareSelection>, options: Option<HostOptions>,
+        workspace: Option<PathBuf>, card: Option<PathBuf>,
+    ) -> std::io::Result<Self> {
         let paths = paths.into();
+        if card.is_some() && paths.device != "k750i" {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidInput, "Select the K750i to use a Memory Stick"));
+        }
+        let k750 = (|| -> anyhow::Result<_> {
+            if paths.device != "k750i" { return Ok(None); }
+            let options = match options {
+                Some(options) => options,
+                None => HostOptions::discover(&std::env::current_dir()?)?,
+            };
+            anyhow::ensure!(paths.files.companions.keys().all(|key| key == "fs"),
+                "The native K750 profile accepts its audited MAIN and FS images; use the research runner for physical ROM/GDFS overrides.");
+            let fs = paths.files.companions.get("fs")
+                .ok_or_else(|| anyhow::anyhow!("Select the matching FS .fbn image."))?.clone();
+            let directory = match workspace {
+                Some(directory) => directory,
+                None => db2010_host::prepare::workspace(&paths.files.image, &fs, &options.data_dir)?,
+            };
+            Ok(Some((options, fs, db2010_host::prepare::LockedWorkspace::try_open(directory)?)))
+        })().map_err(std::io::Error::other)?;
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
         let (sender, events) = event_channel();
@@ -119,81 +150,119 @@ impl Worker {
         let worker_diagnostics = diagnostics.clone();
         let files = PhoneFiles::default();
         let worker_files = files.clone();
+        let worker_card = card.clone();
         let handle = std::thread::Builder::new().name("phone-firmware".into()).spawn(move || {
             // Unicorn owns Rc state and must be constructed inside this thread.
             let result = (|| -> anyhow::Result<String> {
                 worker_diagnostics.log("info", "worker", format!("Starting {} firmware.", paths.device));
-                if paths.device == "k750i" {
-                    let options = match options {
-                        Some(options) => options,
-                        None => HostOptions::discover(&std::env::current_dir()?)?,
-                    };
-                    anyhow::ensure!(paths.files.companions.keys().all(|key| key == "fs"),
-                        "The native K750 profile accepts its audited MAIN and FS images; use the research runner for physical ROM/GDFS overrides.");
-                    let fs = paths.files.companions.get("fs").ok_or_else(|| anyhow::anyhow!("Select the matching FS .fbn image."))?;
-                    let prepared = db2010_host::prepare::prepare_locked(&paths.files.image, fs, &options.data_dir)?;
-                    let mut session = Session::start_prepared_with_services_and_diagnostics(&options, prepared,
-                        worker_audio, worker_files.clone(), worker_diagnostics.clone())?;
-                    let mut due = Instant::now();
-                    let mut status_due = due;
-                    let mut input_due = due;
-                    let mut pending_input = None;
-                    while !worker_stop.load(Ordering::Relaxed) {
-                        if worker_files.pending_commit() {
-                            worker_diagnostics.log("info", "checkpoint", "Saving imported file before completing its move.");
-                            if let Err(error) = session.save() {
-                                worker_diagnostics.log("error", "files", format!("File move could not finish: {error:#}"));
+                if let Some((options, fs, workspace)) = k750 {
+                    let prepared = workspace.prepare(&paths.files.image, &fs)?;
+                    let mut session = Session::start_prepared_with_card(&options, prepared,
+                        worker_audio, worker_files.clone(), worker_diagnostics.clone(), worker_card.as_deref())?;
+                    let result = (|| -> anyhow::Result<()> {
+                        let mut due = Instant::now();
+                        let mut status_due = due;
+                        let mut input_due = due;
+                        let mut pending_input = None;
+                        let mut pause_requested = false;
+                        let mut paused = false;
+                        while !worker_stop.load(Ordering::Relaxed) {
+                            match pending_input.take().or_else(|| worker_input.try_recv().ok()) {
+                                Some(WorkerCommand::SetPaused(next)) => {
+                                    pause_requested = next;
+                                    if paused && !next {
+                                        session.resume()?;
+                                        paused = false;
+                                        due = Instant::now();
+                                        status_due = due;
+                                        input_due = due;
+                                    }
+                                }
+                                Some(WorkerCommand::Keys(keys)) if !paused => {
+                                    if Instant::now() >= input_due {
+                                        session.contacts(&crate::keys::qmp_contacts(keys))?;
+                                        input_due = Instant::now() + PRESENTATION_INTERVAL;
+                                    } else {
+                                        pending_input = Some(WorkerCommand::Keys(keys));
+                                    }
+                                }
+                                Some(WorkerCommand::Stop) => break,
+                                _ => {}
                             }
-                            session.resume_after_save()?;
-                            // Checkpoint time is an intentional pause, not a
-                            // rendering deadline miss or a backlog of polls.
-                            due = Instant::now();
-                            status_due = due;
+                            // Let an accepted file transfer finish; suspending the guest
+                            // midstream would time out the phone's live OBEX connection.
+                            if pause_requested && !paused && !worker_files.snapshot().busy {
+                                session.pause()?;
+                                paused = true;
+                            }
+                            if paused {
+                                // Wait for a command without polling the frozen guest.
+                                pending_input = worker_input.recv().ok();
+                                if pending_input.is_none() { break; }
+                                continue;
+                            }
+                            if worker_files.pending_commit() {
+                                worker_diagnostics.log("info", "checkpoint", "Saving imported file before completing its move.");
+                                if let Err(error) = session.save_with_resume(options.resume) {
+                                    worker_diagnostics.log("error", "files", format!("File move could not finish: {error:#}"));
+                                }
+                                session.resume_after_save()?;
+                                // Checkpoint time is an intentional pause, not a
+                                // rendering deadline miss or a backlog of polls.
+                                due = Instant::now();
+                                status_due = due;
+                            }
+                            if Instant::now() >= due {
+                                if let Some(frame) = session.frame()? {
+                                    if sender.send(WorkerEvent::Lcd(frame)).is_err() { break; }
+                                }
+                                let (_, missed) = poll_delay(&mut due, Instant::now());
+                                if missed != 0 { worker_diagnostics.record_missed_deadlines(missed); }
+                            }
+                            if Instant::now() >= status_due {
+                                let progress = session.progress()?;
+                                worker_files.observe_serial(
+                                    progress["serial_cable_present"] == true,
+                                    progress["serial_input_ready"] == true,
+                                );
+                                let status = format!("Running Sony Ericsson K750i · {:.1} s",
+                                    progress["virtual_ns"].as_u64().unwrap_or(0) as f64 / 1e9);
+                                if sender.send(WorkerEvent::Status(status)).is_err() { break; }
+                                if !progress["running"].as_bool().unwrap_or(false) {
+                                    let summary = session.summary()?;
+                                    let stop = &summary["stop"];
+                                    anyhow::bail!("Firmware stopped: {} at 0x{:08X}, PC=0x{:08X}",
+                                        stop["reason"].as_str().unwrap_or("engine paused"),
+                                        stop["address"].as_u64().unwrap_or(0), stop["pc"].as_u64().unwrap_or(0));
+                                }
+                                status_due = Instant::now() + Duration::from_millis(250);
+                            }
+                            let mut next_due = due.min(status_due);
+                            if pending_input.is_some() { next_due = next_due.min(input_due); }
+                            let delay = next_due.saturating_duration_since(Instant::now());
+                            if pending_input.is_some() {
+                                std::thread::sleep(delay);
+                            } else {
+                                match worker_input.recv_timeout(delay) {
+                                    Ok(command) => pending_input = Some(command),
+                                    Err(mpsc::RecvTimeoutError::Timeout) => {},
+                                    Err(mpsc::RecvTimeoutError::Disconnected) => break,
+                                }
+                            }
                         }
-                        // Contact edges wake the worker immediately, while
-                        // press/release pairs retain the firmware scan interval.
-                        if Instant::now() >= input_due {
-                            if let Some(keys) = pending_input.take().or_else(|| worker_input.try_recv().ok()) {
-                                session.contacts(&crate::keys::qmp_contacts(keys))?;
-                                input_due = Instant::now() + PRESENTATION_INTERVAL;
-                            }
-                        }
-                        if Instant::now() >= due {
-                            if let Some(frame) = session.frame()? {
-                                if sender.send(WorkerEvent::Lcd(frame)).is_err() { break; }
-                            }
-                            let (_, missed) = poll_delay(&mut due, Instant::now());
-                            if missed != 0 { worker_diagnostics.record_missed_deadlines(missed); }
-                        }
-                        if Instant::now() >= status_due {
-                            let progress = session.progress()?;
-                            let status = format!("Running Sony Ericsson K750i · {:.1} s",
-                                progress["virtual_ns"].as_u64().unwrap_or(0) as f64 / 1e9);
-                            if sender.send(WorkerEvent::Status(status)).is_err() { break; }
-                            if !progress["running"].as_bool().unwrap_or(false) {
-                                let summary = session.summary()?;
-                                let stop = &summary["stop"];
-                                anyhow::bail!("Firmware stopped: {} at 0x{:08X}, PC=0x{:08X}",
-                                    stop["reason"].as_str().unwrap_or("engine paused"),
-                                    stop["address"].as_u64().unwrap_or(0), stop["pc"].as_u64().unwrap_or(0));
-                            }
-                            status_due = Instant::now() + Duration::from_millis(250);
-                        }
-                        let mut next_due = due.min(status_due);
-                        if pending_input.is_some() { next_due = next_due.min(input_due); }
-                        let delay = next_due.saturating_duration_since(Instant::now());
-                        if pending_input.is_some() {
-                            std::thread::sleep(delay);
-                        } else {
-                            match worker_input.recv_timeout(delay) {
-                                Ok(keys) => pending_input = Some(keys),
-                                Err(mpsc::RecvTimeoutError::Timeout) => {},
-                                Err(mpsc::RecvTimeoutError::Disconnected) => break,
-                            }
+                        // A final save may need the running guest to disconnect its file service.
+                        if paused { session.resume()?; }
+                        session.save_with_resume(options.resume)
+                    })();
+                    if let Err(error) = result {
+                        match session.recover_internal_memory_after_pmic_stop() {
+                            Ok(true) => anyhow::bail!("{error:#}. Internal memory saved; the next launch will cold boot."),
+                            Ok(false) => return Err(error),
+                            Err(recovery) => anyhow::bail!("{error:#}. Could not recover internal memory: {recovery:#}"),
                         }
                     }
-                    if options.resume { session.save()?; return Ok("Stopped. Phone state saved.".into()); }
-                    return Ok("Stopped.".into());
+                    return Ok(if session.will_save_checkpoint(options.resume) { "Stopped. Phone session and internal storage saved." }
+                        else { "Stopped. Internal storage saved." }.into());
                 }
                 let registry = crate::registry();
                 let mut machine = registry.open(&paths.device, paths.loader.as_deref(), &paths.files, RuntimeOptions::default())?;
@@ -203,12 +272,28 @@ impl Worker {
                 let mut last_report: Option<RunReport> = None;
                 let mut last_keys = 0;
                 let mut input_history = VecDeque::with_capacity(8);
+                let mut paused = false;
                 while !worker_stop.load(Ordering::Relaxed) {
+                    let command = if paused { worker_input.recv().ok() } else { worker_input.try_recv().ok() };
+                    match command {
+                        Some(WorkerCommand::SetPaused(next)) => {
+                            if next && !paused {
+                                machine.set_phone_keys(0)?;
+                                last_keys = 0;
+                            }
+                            paused = next;
+                            worker_diagnostics.set_running(!paused);
+                            continue;
+                        }
+                        Some(WorkerCommand::Stop) => break,
+                        _ if paused => continue,
+                        _ => {}
+                    }
                     // Apply at most one contact transition per guest quantum.
                     // This preserves ordering while ensuring a queued release
                     // cannot overtake the firmware's opportunity to service
                     // the preceding press interrupt.
-                    let input_applied = if let Ok(keys) = worker_input.try_recv() {
+                    let input_applied = if let Some(WorkerCommand::Keys(keys)) = command {
                         let instructions = last_report.as_ref().map_or(0, |report| report.execution.instructions);
                         let pc = last_report.as_ref().map_or(0, |report| report.execution.pc);
                         let entry = format!(
@@ -269,27 +354,34 @@ impl Worker {
             })();
             worker_files.fail_pending_commit("Phone stopped before the imported file could be saved.");
             let summary = match result {
-                Ok(summary) => { worker_diagnostics.log("info", "worker", &summary); summary },
+                Ok(summary) => { worker_diagnostics.log("info", "worker", &summary); Ok(summary) },
                 Err(error) => {
                     let summary = format!("{} error: {error:#}", paths.device);
                     worker_diagnostics.log("error", "worker", &summary);
-                    summary
+                    Err(summary)
                 },
             };
             worker_diagnostics.set_running(false);
             let _ = sender.send(WorkerEvent::Finished(summary));
         })?;
-        Ok(Self { input, last_input: AtomicU32::new(u32::MAX), stop, handle: Some(handle), events, audio, diagnostics, files })
+        Ok(Self { input, last_input: AtomicU32::new(u32::MAX), stop, handle: Some(handle), events, audio, diagnostics, files, card })
     }
 
     pub fn set_phone_keys(&self, keys: u32) {
         if self.last_input.swap(keys, Ordering::Relaxed) == keys { return; }
-        let _ = self.input.send(keys);
+        let _ = self.input.send(WorkerCommand::Keys(keys));
+    }
+
+    pub fn inserted_memory_stick(&self) -> Option<&Path> { self.card.as_deref() }
+
+    pub fn set_paused(&self, paused: bool) {
+        if paused { self.last_input.store(0, Ordering::Relaxed); }
+        let _ = self.input.send(WorkerCommand::SetPaused(paused));
     }
 
     pub fn stop(&mut self) {
-        self.set_phone_keys(0);
         self.stop.store(true, Ordering::Relaxed);
+        let _ = self.input.send(WorkerCommand::Stop);
         if let Some(handle) = self.handle.take() { let _ = handle.join(); }
     }
 }
@@ -309,13 +401,13 @@ mod tests {
         let worker = Worker { input, last_input: AtomicU32::new(u32::MAX),
             stop: Arc::new(AtomicBool::new(false)), handle: None, events,
             audio: AudioBuffer::default(), diagnostics: DiagnosticsHandle::default(),
-            files: PhoneFiles::default() };
+            files: PhoneFiles::default(), card: None };
         for key in [Right, Star, Left, Left, Star, Left, Star, Star, Hash, Zero, Six, Hash] {
             worker.set_phone_keys(key.bit());
             worker.set_phone_keys(key.bit()); // A held contact has no second edge.
             worker.set_phone_keys(0);
-            assert_eq!(receiver.try_recv().unwrap(), key.bit());
-            assert_eq!(receiver.try_recv().unwrap(), 0);
+            assert!(matches!(receiver.try_recv(), Ok(WorkerCommand::Keys(mask)) if mask == key.bit()));
+            assert!(matches!(receiver.try_recv(), Ok(WorkerCommand::Keys(0))));
             assert!(receiver.try_recv().is_err());
             assert!(!worker.diagnostics.developer_mode());
         }
@@ -330,7 +422,7 @@ mod tests {
             assert!(sender.send(WorkerEvent::Status(format!("{revision}"))).is_ok());
             assert!(sender.send(WorkerEvent::InputApplied(format!("input {revision}"))).is_ok());
         }
-        assert!(sender.send(WorkerEvent::Finished("firmware failure".into())).is_ok());
+        assert!(sender.send(WorkerEvent::Finished(Err("firmware failure".into()))).is_ok());
         assert!(events.inner.lock().unwrap().queue.len() <= MAX_PENDING_EVENTS);
         let mut revision = None; let mut finished = false;
         while let Ok(event) = events.try_recv() {

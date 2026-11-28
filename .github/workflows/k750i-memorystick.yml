@@ -1,0 +1,75 @@
+name: K750i Memory Stick storage
+on:
+  push:
+    branches: [test/k750i-memorystick]
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: k750i-memorystick-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  probe:
+    if: >-
+      github.repository == 'tayga16/Ph0nix' &&
+      github.actor_id == '124491388' &&
+      github.triggering_actor == 'tayga16'
+    runs-on: [self-hosted, Linux]
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: src
+      UNICORN_NO_PKG_CONFIG: '1'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Set up stable Rust
+        uses: dtolnay/rust-toolchain@stable
+      - name: Prepare the pinned DB2010 source
+        run: |
+          if ! python3 -m db2010.development.source check; then
+            git submodule deinit -f -- qemu
+            python3 -m db2010.development.source init
+          fi
+      - name: Build the Linux engine on CT100
+        id: engine
+        run: |
+          python3 -m venv build/k750i-test-tools
+          tools="$PWD/build/k750i-test-tools/bin"
+          "$tools/python" -m pip install meson==1.11.1 pytest==8.4.2 \
+            numpy==2.3.4 pyarrow==26.0.0 duckdb==1.5.6
+          export PATH="$tools:$PATH"
+          if ! "$tools/python" -m db2010.development.build --configure --jobs 2; then
+            find build/provenance/qemu -type f -name build.log -exec tail -n 80 {} \; || true
+            exit 1
+          fi
+      - name: Check the empty slot and register bank
+        run: |
+          build/k750i-test-tools/bin/python -m pytest -q \
+            tests/test_memorystick_slot.py tests/test_migrated_maps.py::test_configured_register_views
+      - name: Check the desktop and launcher integration
+        if: ${{ !cancelled() && steps.engine.outcome == 'success' }}
+        run: |
+          if pkg-config --exists gtk+-3.0 alsa xkbcommon; then
+            cargo check --locked -p featurephone-desktop
+          else
+            echo '::notice::Desktop libraries are missing on CT100; checking the launcher without desktop features'
+            cargo check --locked -p featurephone-desktop --no-default-features
+          fi
+      - name: Read, write and reboot with a Memory Stick in R1DB001
+        if: ${{ !cancelled() && steps.engine.outcome == 'success' }}
+        run: |
+          work="$(mktemp -d "$RUNNER_TEMP/ph0nix-memorystick.XXXXXXXX")"
+          trap 'rm -rf -- "$work"' EXIT
+          python3 -m db2010.development.firmware init k750i --prefix --input-root "$work"
+          firmware="$work/fw/k750i/images/R1DB001/cid49/sony-ericsson"
+          if ! cargo run --locked -p db2010-host --example memorystick-probe -- \
+            "$PWD/qemu/build/qemu-system-arm" "$work/phone" \
+            "$firmware/K750_R1DB001_MAIN_EU_1_CL_RED49.mbn" \
+            "$firmware/K750_R1DB001_FS_EMEA_1_RED49.fbn"; then
+            find "$work/phone" -name engine.log -type f -print -exec tail -n 80 {} \;
+            exit 1
+          fi
+  android:
+    needs: probe
+    uses: ./.github/workflows/k750i-android-apk.yml
