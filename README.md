@@ -45,3 +45,7 @@ with native applications for Linux, Windows and Android.
 
 In **Settings → MIDI SoundFont**, choose your own `.sf2` file (up to 128 MiB). The app keeps a private copy and uses it the next time you open a K750i. Use **Restore default MIDI sound** to remove it. A regular APK does not bundle a SoundFont; without one, MIDI uses the built-in synthesizer. When resuming a saved session, a track that was already playing uses the built-in synthesizer until the next track starts.
 
+## K750i self-hosted tests
+
+In the original repository, assign the `ph0nix-owner` label to its Linux x64 self-hosted runner, then run **K750i internal storage** on `main` from the Actions tab. The workflow checks cold-boot storage and builds a verified `ph0nix-k750i-test-arm64` artifact. This APK installs separately from the regular app as `org.featurephone.emulator.test`.
+

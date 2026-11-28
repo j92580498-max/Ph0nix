@@ -1,22 +1,17 @@
 name: K750i internal storage
 on:
-  push:
-    branches: [test/k750i-internal-storage]
-    paths-ignore:
-      - '.github/workflows/k750i-internal-storage.yml'
-      - '.github/workflows/k750i-android-apk.yml'
-      - 'frontends/android/**'
+  workflow_dispatch:
 permissions:
   contents: read
+concurrency:
+  group: k750i-internal-storage-${{ github.ref }}
+  cancel-in-progress: false
 jobs:
   cold-boot:
     if: >-
-      github.repository == 'tayga16/Ph0nix' &&
-      github.actor_id == '124491388' &&
-      github.triggering_actor == 'tayga16'
-    runs-on:
-      - self-hosted
-      - Linux
+      github.repository == 'j92580498-max/Ph0nix' &&
+      github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, X64, ph0nix-owner]
     timeout-minutes: 60
     env:
       PYTHONPATH: src
@@ -91,3 +86,6 @@ jobs:
           path: build/k750i-test-lcd/*.ppm
           if-no-files-found: ignore
           retention-days: 3
+  android:
+    needs: cold-boot
+    uses: ./.github/workflows/k750i-android-apk.yml

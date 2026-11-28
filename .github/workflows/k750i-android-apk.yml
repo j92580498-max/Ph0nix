@@ -1,17 +1,6 @@
 name: K750i Android APK
 on:
   workflow_call:
-  push:
-    branches: [test/k750i-internal-storage, test/k750i-android-apk]
-    paths:
-      - '.github/workflows/k750i-android-apk.yml'
-      - 'frontends/android/**'
-      - 'native/**'
-      - 'src/db2010/development/source.py'
-      - 'dependencies/**'
-      - 'Cargo.*'
-      - '.cargo/**'
-      - 'qemu'
 permissions:
   contents: read
 concurrency:
@@ -20,10 +9,10 @@ concurrency:
 jobs:
   apk:
     if: >-
-      github.repository == 'tayga16/Ph0nix' &&
-      github.actor_id == '124491388' &&
-      github.triggering_actor == 'tayga16'
-    runs-on: [self-hosted, Linux]
+      github.repository == 'j92580498-max/Ph0nix' &&
+      github.ref == 'refs/heads/main' &&
+      github.event_name == 'workflow_dispatch'
+    runs-on: [self-hosted, Linux, X64, ph0nix-owner]
     timeout-minutes: 60
     env:
       PYTHONPATH: src
@@ -93,8 +82,6 @@ jobs:
           echo "FEATUREPHONE_PYTHON=$GITHUB_WORKSPACE/build/android/host-tools/bin/python" >> "$GITHUB_ENV"
           ndk="$ANDROID_HOME/ndk/29.0.14206865"
           echo "ANDROID_NDK_HOME=$ndk" >> "$GITHUB_ENV"
-          # The official NDK includes an x64 Linux toolchain. CT100 needs no
-          # system package installation to get the Android cross compiler.
           echo "FEATUREPHONE_ANDROID_CLANG=$ndk/toolchains/llvm/prebuilt/linux-x86_64/bin/clang" >> "$GITHUB_ENV"
       - name: Test the phone file service
         run: 'cargo test --locked -p db2010-host --lib storage::'
@@ -119,25 +106,25 @@ jobs:
             find "$work/phone" -type f -name engine.log -exec tail -n 60 {} \; || true
             exit 1
           fi
-      - name: Build and test the APK
+      - name: Build and test the test APK
         working-directory: frontends/android
-        run: ./gradlew --no-daemon --console=plain assembleRelease lintRelease testDebugUnitTest
+        run: ./gradlew --no-daemon --console=plain -Pph0nixTestApk=true assembleRelease lintRelease testDebugUnitTest
       - name: Verify and package the APK
         run: |
           mkdir -p dist/k750i-android
-          apk=dist/k750i-android/ph0nix-k750i-arm64.apk
+          apk=dist/k750i-android/ph0nix-k750i-test-arm64.apk
           cp frontends/android/app/build/outputs/apk/release/app-release.apk "$apk"
           python3 frontends/android/build-support/verify_apk.py "$apk" \
             --ndk "$ANDROID_NDK_HOME" \
             --aapt2 "$ANDROID_HOME/build-tools/35.0.0/aapt2" \
             --apksigner "$ANDROID_HOME/build-tools/35.0.0/apksigner" \
-            --expected-certificate-sha256 6afca99ee47fb55c27316d9c7f38f36a1ad7a19779505c49217c51c5758dc012 \
+            --test-apk \
             --report dist/k750i-android/apk-verification.json
           cp build/android/qemu/provenance.json dist/k750i-android/engine-provenance.json
           cd dist/k750i-android
-          sha256sum ph0nix-k750i-arm64.apk > ph0nix-k750i-arm64.apk.sha256
+          sha256sum ph0nix-k750i-test-arm64.apk > ph0nix-k750i-test-arm64.apk.sha256
       - uses: actions/upload-artifact@v4
         with:
-          name: ph0nix-k750i-arm64
+          name: ph0nix-k750i-test-arm64
           path: dist/k750i-android/*
           if-no-files-found: error
